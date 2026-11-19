@@ -2,7 +2,7 @@
 // here may throw when the SDK is missing: a blocked sdk.bloxity.io leaves the
 // game fully playable on the default avatar and keyboard controls.
 // Docs: https://docs.bloxity.io/#html5
-import { GAME_SLUG, GAME_TITLE, SETTINGS, DEV_MODE, coerceSetting } from './config.js'
+import { GAME_SLUG, GAME_TITLE, SETTINGS, DEV_MODE, LEADERBOARDS, coerceSetting } from './config.js'
 
 export function sdk() {
   if (DEV_MODE) return null
@@ -24,6 +24,8 @@ const proportionListeners = new Set()
 const authListeners = new Set()
 const settingListeners = new Set()
 const respawnListeners = new Set()
+const adBreakListeners = new Set()
+const emoteListeners = new Set()
 const unsubscribers = []
 
 function emit(listeners, ...args) {
@@ -145,6 +147,7 @@ export function init() {
     const onLocalhost = /^(localhost|127\.0\.0\.1)$/.test(window.location.hostname)
     SDK.init(onLocalhost ? { gameSlug: GAME_SLUG, portalUrl: 'https://bloxity.io' } : { gameSlug: GAME_SLUG })
     SDK.game.loadingStep(`Loading ${GAME_TITLE}`)
+    setupPlatformFeatures(SDK)
 
     for (const key of Object.keys(SETTINGS)) {
       const off = SDK.settings.listen(key, (raw) => {
@@ -180,6 +183,12 @@ export function init() {
     unsubscribers.push(
       SDK.player.onEvent((event) => {
         if (event === 'respawn_request') emit(respawnListeners)
+      }),
+    )
+    // Emotes are played from the portal's emote wheel: the event carries the catalogue id.
+    unsubscribers.push(
+      SDK.player.onEvent((event, data) => {
+        if (event === 'play_emote' && typeof data === 'string') emit(emoteListeners, data)
       }),
     )
 
@@ -377,6 +386,152 @@ export function requestFullscreen(on) {
     if (!SDK) return
     if (on) SDK.portal.requestFullscreen()
     else SDK.portal.exitFullscreen()
+  } catch {
+    // Ignore.
+  }
+}
+
+// --- Platform features (docs.bloxity.io) -------------------------------------------------
+// Declared once right after init: the leaderboards, the ad break handlers and ad screens, and the
+// emotes feature. Each is guarded on its own so one missing API never takes the others down.
+function setupPlatformFeatures(SDK) {
+  try {
+    // Hosted games: the server reports the scores (backend reporter.ts); the client only declares.
+    SDK.leaderboard?.define?.(LEADERBOARDS)
+  } catch (err) {
+    console.warn('[bloxity] leaderboard.define failed', err)
+  }
+  try {
+    // Boxity can start an ad break at any moment: pause and mute until it ends.
+    SDK.ads?.onBreakStart?.(() => emit(adBreakListeners, true))
+    SDK.ads?.onBreakEnd?.(() => emit(adBreakListeners, false))
+    // Every screen that can show a banner, always including `gameplay` (its banners stay off).
+    SDK.ads?.declareScreens?.({ panel: {}, gameplay: {} })
+  } catch (err) {
+    console.warn('[bloxity] ads setup failed', err)
+  }
+  try {
+    SDK.game?.registerFeature?.('emotes')
+  } catch (err) {
+    console.warn('[bloxity] registerFeature failed', err)
+  }
+}
+
+// fn(true) when an ad break starts (pause + mute), fn(false) when it ends.
+export function onAdBreak(fn) {
+  adBreakListeners.add(fn)
+  return () => adBreakListeners.delete(fn)
+}
+
+// The player's token for the game server, which asks Bloxity who it belongs to (backend auth.ts).
+// '' for a guest or without the SDK.
+export async function getToken() {
+  try {
+    return (await sdk()?.auth?.getToken?.()) || ''
+  } catch {
+    return ''
+  }
+}
+
+// Banner ads for a screen ('panel' while a window is open); a new call replaces the previous one.
+let adScreen = null
+export function showAdScreen(type = 'panel') {
+  try {
+    adScreen = sdk()?.ads?.screen?.(type) ?? null
+  } catch {
+    adScreen = null
+  }
+}
+export function hideAdScreen() {
+  try {
+    if (adScreen?.hide) adScreen.hide()
+    else sdk()?.ads?.hideScreen?.()
+  } catch {
+    // Ignore.
+  }
+  adScreen = null
+}
+
+// Rewarded ads: only offered while one can play. Dev mode (no SDK) pretends so the flow can be tried.
+export function adsAvailable() {
+  if (DEV_MODE) return true
+  try {
+    return !!sdk()?.ads?.isAvailable?.()
+  } catch {
+    return false
+  }
+}
+// Resolves the ad's status: 'completed' | 'skipped' | 'no-fill' | 'blocked' | 'error' | 'denied' |
+// 'disabled' | 'unavailable'. Grant the reward only on 'completed'.
+export async function showRewardedAd(placement) {
+  if (DEV_MODE && !sdk()) return new Promise((resolve) => setTimeout(() => resolve('completed'), 800))
+  try {
+    const r = await sdk()?.ads?.showRewarded?.(placement)
+    return typeof r?.status === 'string' ? r.status : 'unavailable'
+  } catch {
+    return 'error'
+  }
+}
+
+// Chat (Boxity draws the chat UI itself; the game only shows bubbles). fn(message) with
+// { userId, username, text, isGif, at, isLocalPlayer }.
+export function onChatMessage(fn) {
+  try {
+    const off = sdk()?.chat?.onMessage?.(fn)
+    if (typeof off === 'function') return off
+  } catch {
+    // Ignore.
+  }
+  return () => {}
+}
+// A bubble over `root` for this message; returns { remove() } (or null without the SDK).
+export function attachChatBubble(THREE, root, message, height) {
+  try {
+    const chat = sdk()?.chat
+    if (!chat?.attachBubble) return null
+    return chat.attachBubble(THREE, root, chat.bubbleText ? chat.bubbleText(message) : message.text, { height })
+  } catch {
+    return null
+  }
+}
+
+// Emotes: the portal's emote wheel sends play_emote with a catalogue id; the catalogue (name, clip)
+// is fetched once from the API host the environment reports.
+export function onEmote(fn) {
+  emoteListeners.add(fn)
+  return () => emoteListeners.delete(fn)
+}
+let emoteCatalog = null
+// The clip { len, loop, tracks } for an emote id, null when unknown (ignored silently).
+export async function loadEmoteClip(id) {
+  try {
+    if (!emoteCatalog) {
+      const apiUrl = sdk()?.environment?.()?.apiUrl
+      if (!apiUrl) return null
+      const res = await fetch(`${apiUrl.replace(/\/$/, '')}/v1/avatar/emotes`)
+      if (!res.ok) return null
+      const body = await res.json()
+      const list = Array.isArray(body) ? body : Array.isArray(body?.emotes) ? body.emotes : []
+      emoteCatalog = new Map(list.filter((e) => e && typeof e.id === 'string').map((e) => [e.id, e]))
+    }
+    const clip = emoteCatalog.get(id)?.clip
+    return clip && typeof clip.len === 'number' && clip.tracks ? clip : null
+  } catch {
+    return null
+  }
+}
+
+// Friend-join toasts: the portal shows "<name> joined" when a friend appears in this room.
+export function playerJoined(username) {
+  try {
+    sdk()?.game?.playerJoined?.(username)
+  } catch {
+    // Ignore.
+  }
+}
+export function playerInRoom(username) {
+  try {
+    sdk()?.game?.playerInRoom?.(username)
   } catch {
     // Ignore.
   }

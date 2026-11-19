@@ -48,11 +48,11 @@
   background: var(--hg);
   box-shadow: inset 0 0.45em 0 rgba(255, 255, 255, 0.45), inset 0 -0.45em 0 rgba(0, 0, 0, 0.16), 0 0.35em 0 rgba(0, 0, 0, 0.35);
 }
-.gw.t-blue { --hg: linear-gradient(180deg, #8ad6ff 0%, #4aa8ff 45%, #2f86f0 100%); --pg: rgba(84, 196, 52, 0.86); }
-.gw.t-orange { --hg: linear-gradient(180deg, #ffd29a 0%, #ffa24a 45%, #f2801f 100%); --pg: rgba(84, 196, 52, 0.86); }
-.gw.t-yellow { --hg: linear-gradient(180deg, #fffb9a 0%, #fff02a 45%, #f2d812 100%); --pg: rgba(84, 196, 52, 0.86); }
-.gw.t-pink { --hg: linear-gradient(180deg, #ffa8d8 0%, #ff63ad 45%, #f0367f 100%); --pg: rgba(84, 196, 52, 0.86); }
-.gw.t-cyan { --hg: linear-gradient(180deg, #c0faff 0%, #6eeaff 45%, #2ccdf0 100%); --pg: rgba(84, 196, 52, 0.86); }
+.gw.t-blue { --hg: linear-gradient(180deg, #8ad6ff 0%, #4aa8ff 45%, #2f86f0 100%); --pg: rgba(84, 196, 52, var(--panel-alpha, 0.86)); }
+.gw.t-orange { --hg: linear-gradient(180deg, #ffd29a 0%, #ffa24a 45%, #f2801f 100%); --pg: rgba(84, 196, 52, var(--panel-alpha, 0.86)); }
+.gw.t-yellow { --hg: linear-gradient(180deg, #fffb9a 0%, #fff02a 45%, #f2d812 100%); --pg: rgba(84, 196, 52, var(--panel-alpha, 0.86)); }
+.gw.t-pink { --hg: linear-gradient(180deg, #ffa8d8 0%, #ff63ad 45%, #f0367f 100%); --pg: rgba(84, 196, 52, var(--panel-alpha, 0.86)); }
+.gw.t-cyan { --hg: linear-gradient(180deg, #c0faff 0%, #6eeaff 45%, #2ccdf0 100%); --pg: rgba(84, 196, 52, var(--panel-alpha, 0.86)); }
 .gw-ico {
   position: absolute;
   left: 0.2em;

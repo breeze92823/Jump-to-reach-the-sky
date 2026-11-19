@@ -42,13 +42,26 @@ try {
 } catch {
   // Storage blocked: unmuted.
 }
-const level = () => (muted ? 0 : volume * volume) // perceptual: the slider feels even
+let suspended = false // an ad break is playing: silence, but not the saved mute setting
+const level = () => (muted || suspended ? 0 : volume * volume) // perceptual: the slider feels even
 function applyLevel(t = 0.05) {
   if (A.master) A.master.gain.setTargetAtTime(level(), A.ctx.currentTime, t)
 }
 export function setVolume(v) {
   volume = Math.max(0, Math.min(1, Number(v) || 0))
   applyLevel()
+}
+// Ad breaks (Legion ads.onBreakStart / onBreakEnd) mute everything without touching the saved mute.
+export function setSuspended(on) {
+  suspended = !!on
+  applyLevel(0.02)
+}
+// The portal's music_volume (0..1, 1 = the designed level): the ambience bed, there is no music track.
+let musicScale = 1
+const ambLevel = () => AUDIO.buses.amb * musicScale
+export function setMusicVolume(v) {
+  musicScale = Math.max(0, Math.min(1.25, (Number(v) || 0) / AUDIO.volume))
+  if (A.amb) A.amb.gain.setTargetAtTime(ambLevel(), A.ctx.currentTime, 0.05)
 }
 export const isMuted = () => muted
 export function setMuted(on) {
@@ -176,7 +189,7 @@ function buildGraph() {
   A.ui = bus(AUDIO.buses.ui)
   A.sfx = bus(AUDIO.buses.sfx)
   A.world = bus(ducked ? AUDIO.duck : 1)
-  A.amb = bus(AUDIO.buses.amb, A.world)
+  A.amb = bus(ambLevel(), A.world)
   A.engine = bus(AUDIO.buses.engine, A.world)
   const conv = ctx.createConvolver()
   conv.buffer = makeImpulse(ctx)
