@@ -32,5 +32,7 @@ SDK integrations in the client (`src/bloxity.js` is the only place that calls th
 - character kit: `Legion.SDK.character.dress` on the game's own rig (`avatar.getOutfitKey()`, `handle.update` on look
   changes), with the manual cosmetics path as the fallback (`src/main.js` loadAvatar / lookChanged)
 - party play: automatic on Bloxity hosting (pinned SDK URL, matchmaker, `maxClients` 6 = room size)
+- Open Rooms: the backend runs the room reporter (`src/legion-room-reporter.ts`), the client reports its room with
+  `updateRoom` and joins a `?roomId=` launch through the pod's relay (`locateRoom`)
 - multiplayer: matchmaker `net.resolveEndpoint`, `updateRoom`, the `?roomId=` launch room, friend-join toasts
   (`playerJoined` / `playerInRoom`); room size = the number of bases in the hub
