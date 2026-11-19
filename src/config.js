@@ -472,6 +472,28 @@ export const SETTINGS = {
   camera_sensitivity: { def: '1', type: 'number', min: 0.1, max: 5 },
   show_fps: { def: 'false', type: 'bool' },
   fullscreen: { def: 'false', type: 'bool' },
+  // The portal's other standard keys (registering one adds its control to the portal menu):
+  master_volume: { def: '80', type: 'number', min: 0, max: 100 }, // all sound (audio/core.js setVolume)
+  music_volume: { def: '80', type: 'number', min: 0, max: 100 }, // the ambience bed (setMusicVolume); there is no music track
+  enable_chat: { def: 'true', type: 'bool' }, // chat bubbles over heads
+  background_transparency: { def: '0.9', type: 'number', min: 0.2, max: 1 }, // window panels (--panel-alpha)
+}
+
+// Bloxity leaderboards (bloxity.js defines them right after init; the SERVER reports the scores:
+// backend LEADERBOARDS, same ids, max 10, permanent once created). Boxity draws the trophy / panel.
+export const LEADERBOARDS = [
+  { id: 'total-earned', label: 'Total Money Earned', order: 'desc', mode: 'best', format: 'compact', reset: 'none' },
+  { id: 'jump-power', label: 'Highest Jump Power', order: 'desc', mode: 'best', format: 'compact', reset: 'none' },
+  { id: 'rebirths', label: 'Rebirths', order: 'desc', mode: 'best', format: 'number', reset: 'none' },
+]
+
+// Rewarded ads (bloxity.js showRewardedAd): a "Free Boost" offer in the HUD. The reward is only
+// granted when the ad reports `completed`; there is a cooldown so it cannot be spammed.
+export const ADS = {
+  placement: 'free-boost', // lowercase letters, digits, hyphens
+  boost: 'money2', // STORE.boosts id
+  minutes: 5,
+  cooldown: 120, // s between rewarded ads
 }
 
 // The base rig, measured from player.glb: origin at the feet, 6.4 units tall at bind pose.

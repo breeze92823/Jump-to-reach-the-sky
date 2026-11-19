@@ -1,5 +1,6 @@
 import { ACESFilmicToneMapping, Clock, NeutralToneMapping, Group, PCFSoftShadowMap, PerspectiveCamera, Scene, SRGBColorSpace, WebGLRenderer } from 'three'
-import { CAMERA, graphicsPreset, RENDER, setLocalBase } from './config.js'
+import * as THREE from 'three' // handed to the portal's chat-bubble helper
+import { CAMERA, graphicsPreset, PLAYER_DIMS, RENDER, setLocalBase } from './config.js'
 import * as bloxity from './bloxity.js'
 import { install as installInput, onKey } from './input.js'
 import { installTouch } from './touch.js'
@@ -10,12 +11,13 @@ import { bodyCount, initPhysics, stepPhysics } from './physics.js'
 import { createLighting } from './lighting.js'
 import { createWorld } from './world.js'
 import { buildHub } from './hub/index.js'
-import { installAudio } from './audio/core.js'
+import { installAudio, setMusicVolume, setSuspended, setVolume } from './audio/core.js'
 import { createPostFx } from './postfx.js'
 import { setNeonBloom } from './propkit.js'
 import { buildDefaultCharacter, loadBaseCharacter } from './avatar/character.js'
 import { applyProportions, attachEquippedAccessories } from './avatar/loader.js'
 import { disposeAnimator, makeAnimator } from './avatar/animator.js'
+import { createEmotes } from './avatar/emotes.js'
 import { earn, game, load as loadSave, resetSave } from './game/state.js'
 import { net, startNet } from './net.js'
 import { createHud } from './ui/hud.js'
@@ -30,8 +32,13 @@ let postfx = null
 let hub = null
 
 // Settings come from the portal's settings menu (or their defaults offline).
+let chatEnabled = true
 function applySetting(key, value) {
   if (key === 'camera_sensitivity') setCameraSensitivity(value)
+  else if (key === 'master_volume') setVolume(value / 100)
+  else if (key === 'music_volume') setMusicVolume(value / 100)
+  else if (key === 'enable_chat') chatEnabled = value
+  else if (key === 'background_transparency') document.documentElement.style.setProperty('--panel-alpha', String(value))
   else if (key === 'fullscreen') bloxity.requestFullscreen(value)
   else if (key === 'graphics_quality' && renderer) {
     const next = graphicsPreset(value)
@@ -154,6 +161,27 @@ bloxity.onAvatarChanged(loadAvatar)
 bloxity.onProportionsChanged(() => applyProportions(avatar, bloxity.getProportions()))
 bloxity.onRespawnRequest(respawn)
 
+// --- Portal features: ad breaks, chat bubbles, emotes ------------------------------
+// Boxity can start an ad break at any moment: the loop freezes (no physics, no clock) and the sound
+// is muted until it ends.
+let adBreak = false
+bloxity.onAdBreak((on) => {
+  adBreak = on
+  setSuspended(on)
+})
+// Chat is Boxity's own UI; the game only shows the local player's bubble over their head (the other
+// players are not drawn yet). enable_chat switches the bubbles off.
+let bubble = null
+bloxity.onChatMessage((m) => {
+  if (!chatEnabled || !m?.isLocalPlayer) return
+  bubble?.remove?.()
+  bubble = bloxity.attachChatBubble(THREE, playerGroup, m, PLAYER_DIMS.height + 0.8)
+})
+// Emotes come from the portal's wheel (a catalogue id); they play on top of the animator and stop
+// when the player moves.
+const emotes = createEmotes()
+bloxity.onEmote(async (id) => emotes.play(await bloxity.loadEmoteClip(id)))
+
 // --- Modes + keys --------------------------------------------------------------
 onModeChanged((mode) => {
   playerGroup.visible = mode !== 'player' // first person: you are the camera
@@ -171,6 +199,7 @@ let readySince = 0
 renderer.setAnimationLoop(() => {
   const dt = Math.min(clock.getDelta(), 0.1) // clamp huge frames (tab switch, breakpoint)
   const elapsed = clock.elapsedTime
+  if (adBreak) return // an ad break is playing: nothing moves until it ends
 
   stepPhysics(dt) // runs the player controller + world at the fixed rate, interpolates bodies
   interpolatePlayer()
@@ -185,6 +214,7 @@ renderer.setAnimationLoop(() => {
     turn: 0,
     carry: hub.carry.has(),
   })
+  emotes.update(avatar, dt, !player.grounded || Math.hypot(player.velocity.x, player.velocity.z) > 0.5)
 
   backItem.update(elapsed, dt)
   updateCamera(camera, dt)
@@ -214,5 +244,5 @@ if (import.meta.env.DEV) {
     window.removeEventListener('beforeunload', bloxity.teardown)
     setTimeout(() => location.reload(), 300) // let the server's wipe go out first
   }
-  window.__game = { player, scene, renderer, camera, postfx, hub, hud, game, bodies: bodyCount, toggleMode, teleport, reset, earn }
+  window.__game = { emotes, player, scene, renderer, camera, postfx, hub, hud, game, bodies: bodyCount, toggleMode, teleport, reset, earn }
 }

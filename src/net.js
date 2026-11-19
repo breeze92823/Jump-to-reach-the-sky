@@ -16,7 +16,7 @@
 // on the local save and keeps trying to connect.
 import { Client } from '@colyseus/sdk'
 import { DEV_MODE, NET, SERVER_URL } from './config.js'
-import { authState, canResolveServer, getPfp, launchRoomId, locateRoom, resolveServerEndpoint, subscribeAuth, updateRoom } from './bloxity.js'
+import { authState, canResolveServer, getPfp, getToken, launchRoomId, locateRoom, playerInRoom, playerJoined, resolveServerEndpoint, subscribeAuth, updateRoom } from './bloxity.js'
 import { game, saveHooks, setSaveOwner, snapshot, toast, wipeHooks } from './game/state.js'
 
 export const net = {
@@ -243,6 +243,27 @@ function attach(room) {
   })
   // The server answers (base, progress, daily, leaderboards) once it knows we are listening.
   send('sync')
+  watchRoster(room)
+}
+
+// Tells the portal who is in this room (it shows "<friend> joined" toasts for friends): the players
+// already here when we arrive are reported with playerInRoom, later arrivals with playerJoined.
+// The roster is polled; it only changes when somebody joins or leaves.
+function watchRoster(room) {
+  const known = new Set()
+  let first = true
+  const scan = () => {
+    if (net.room !== room) return clearInterval(timer)
+    const players = room.state?.players
+    if (!players?.forEach) return
+    players.forEach((p, id) => {
+      if (id === room.sessionId || known.has(id)) return
+      known.add(id)
+      if (p.username) (first ? playerInRoom : playerJoined)(p.username)
+    })
+    first = false
+  }
+  const timer = setInterval(scan, 2000)
 }
 
 // The ?roomId= this page was opened with (Open Rooms Join / friend invite): tried on the first
@@ -281,7 +302,9 @@ async function connect() {
     const id = identity()
     sentId = id.userId
     setSaveOwner(sentId)
-    const options = { ...id, pfp: getPfp() }
+    // The token is what the server trusts: it asks Bloxity who it belongs to. The id is only used by a
+    // local development server.
+    const options = { ...id, token: await getToken(), pfp: getPfp() }
     const { room, relay } = (await joinLaunchRoom(options)) ?? (await joinAnyRoom(options))
     retryIn = NET.retry
     attach(room)
@@ -299,16 +322,17 @@ async function connect() {
 }
 
 // Signed in / out while connected: save under the old id, then tell the server who we are now.
-function onAuth(s) {
+async function onAuth(s) {
   if (!s.ready) return
   if (!net.connected) return void connect()
   const id = identity()
-  if (id.userId === sentId) return send('identify', { username: id.username, pfp: getPfp() })
+  const token = await getToken()
+  if (id.userId === sentId) return send('identify', { username: id.username, pfp: getPfp(), token })
   pushSave(snapshot(), true) // under the old id, before switching
   net.hydrated = false
   net.dailyKnown = false
   sentId = id.userId
-  send('identify', { ...id, pfp: getPfp() })
+  send('identify', { ...id, token, pfp: getPfp() })
 }
 
 // Starts the connection and resolves with the server's first answer, which main.js loads before it

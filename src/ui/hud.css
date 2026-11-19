@@ -870,3 +870,43 @@
 @keyframes shimmer {
   to { background-position: 300% 0; }
 }
+
+/* Rewarded ad offer: a compact pill under the other offers (shown only while an ad can play). */
+.offer.ad {
+  display: flex;
+  align-items: center;
+  gap: 0.5em;
+  min-height: 44px;
+  padding: 0.35em 0.7em;
+  border-radius: 0.9em;
+  background: linear-gradient(180deg, #8dff5a, #35c21d);
+  box-shadow: inset 0 0.2em 0 rgba(255, 255, 255, 0.45), 0 0.2em 0 rgba(0, 0, 0, 0.3);
+  text-align: left;
+}
+.offer.ad.wait {
+  filter: grayscale(0.7) brightness(0.9);
+}
+.offer.ad .adplay {
+  flex: none;
+  width: 1.9em;
+  height: 1.9em;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #fff;
+  color: #1c8a10;
+  font-size: clamp(11px, 2vmin, 18px);
+}
+.offer.ad .adtxt {
+  min-width: 0;
+}
+.offer.ad .name {
+  font-size: clamp(13px, 2.3vmin, 24px);
+}
+.offer.ad .sub {
+  font-size: clamp(9px, 1.5vmin, 14px);
+  line-height: 1.1;
+  -webkit-text-stroke: 0.16em var(--ink);
+  paint-order: stroke fill;
+}

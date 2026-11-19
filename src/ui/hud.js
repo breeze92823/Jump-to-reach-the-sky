@@ -11,7 +11,7 @@
 // re-lays out on resize; touch gets bigger targets and a top stats row.
 import './hud.css'
 import { Vector3 } from 'three'
-import { INDEX_BONUS, STORE, TELEPORTS, ZONES } from '../config.js'
+import { ADS, INDEX_BONUS, STORE, TELEPORTS, ZONES } from '../config.js'
 import { addBoost, bus, canAfford, creatureInfo, game, incomeOf, indexBonus, indexFound, spend, totalIncome } from '../game/state.js'
 import { LEVELS, laneProgress } from '../game/levels.js'
 import { player } from '../player.js'
@@ -112,8 +112,38 @@ export function createHud({ renderer, camera, hub, teleport }) {
   oStarter.innerHTML = `<div class="burst"></div><div class="title">Starter Pack</div><div class="art"></div><div class="lines"><div class="o">+30% Jump Power (30m)</div><div class="g">+ Diamond Pengwaddle</div></div><div class="limited">LIMITED OFFER</div><div class="price">ONLY ${money(STORE.starter.price)}</div>`
   const oVip = btn('offer vip', `<div class="burst"></div><div class="price">${money(STORE.vip.price)}</div><div class="art">${ICONS.vip}</div><div class="name">VIP</div>`, () => buyPerk('vip'))
   const oJump = btn('offer jump15', `<div class="burst"></div><div class="price">${money(STORE.jump15.price)}</div><div class="art">${ICONS.jumper}</div><div class="name">1.5x Jump Power</div>`, () => buyPerk('jump15'))
-  offers.append(oStarter, oVip, oJump)
+  // Rewarded ad: a free boost for watching one. Only shown while an ad can play; the boost is only
+  // granted when the ad reports `completed`, and there is a cooldown between ads.
+  const oAd = btn('offer ad', '', () => watchAd())
+  oAd.style.display = 'none'
+  offers.append(oStarter, oVip, oJump, oAd)
   root.append(offers)
+  let adReadyAt = 0 // performance.now() / 1000 of the next allowed ad
+  let adBusy = false
+  async function watchAd() {
+    if (adBusy || performance.now() / 1000 < adReadyAt) return
+    adBusy = true
+    const status = await bloxity.showRewardedAd(ADS.placement)
+    adBusy = false
+    if (status === 'completed') {
+      addBoost(ADS.boost, ADS.minutes)
+      adReadyAt = performance.now() / 1000 + ADS.cooldown
+      sfx.buy()
+      toast(`${STORE.boosts[ADS.boost].name} for ${ADS.minutes} minutes!`, 'good')
+    } else if (status === 'skipped') toast('Watch the whole ad to get the boost.', 'info')
+    else toast('No ad is available right now. Try again in a bit.', 'info')
+  }
+  function updateAdOffer() {
+    const on = bloxity.adsAvailable()
+    const wait = Math.max(0, Math.ceil(adReadyAt - performance.now() / 1000))
+    const key = on ? (wait > 0 ? `wait${wait}` : 'ready') : 'off'
+    if (oAd.dataset.key === key) return
+    oAd.dataset.key = key
+    oAd.style.display = on ? '' : 'none'
+    oAd.classList.toggle('wait', wait > 0)
+    const sub = wait > 0 ? `Next in ${Math.floor(wait / 60)}:${String(wait % 60).padStart(2, '0')}` : `Watch an ad: ${STORE.boosts[ADS.boost].name} (${ADS.minutes}m)`
+    oAd.innerHTML = `<div class="adplay">&#9654;</div><div class="adtxt"><div class="name">Free Boost</div><div class="sub">${sub}</div></div>`
+  }
 
   // --- Zone bar --------------------------------------------------------------------------------------
   const bar = h('div', 'hud-bar')
@@ -200,7 +230,10 @@ export function createHud({ renderer, camera, hub, teleport }) {
     if (document.pointerLockElement) document.exitPointerLock?.()
     setDucked(true)
     sfx.ui('open')
-    if (!switching) sfx.whoosh(null)
+    if (!switching) {
+      sfx.whoosh(null)
+      bloxity.showAdScreen('panel') // banner ads while a window is open
+    }
     win = { body, el: w, main, foot, count: cnt, refresh: null }
     const api = win
     build(body, api)
@@ -221,6 +254,7 @@ export function createHud({ renderer, camera, hub, teleport }) {
     }, 140)
     if (w) w.style.pointerEvents = 'none'
     setDucked(false)
+    bloxity.hideAdScreen()
     sfx.ui('close')
   }
   // Esc closes a window before the portal menu gets it.
@@ -588,6 +622,7 @@ export function createHud({ renderer, camera, hub, teleport }) {
       oStarter.classList.toggle('owned', game.perks.starter)
       oVip.classList.toggle('owned', game.perks.vip)
       oJump.classList.toggle('owned', game.perks.jump15)
+      updateAdOffer()
       if (!oStarter.dataset.art) {
         oStarter.dataset.art = '1'
         oStarter.querySelector('.art').innerHTML = `<img src="${thumb(STORE.starter.creature.species, STORE.starter.creature.variant)}" alt="">`

@@ -1,0 +1,28 @@
+<!doctype html>
+<html><head><meta charset="UTF-8" /><title>fake sdk</title></head><body>
+<script>
+// TEMPORARY test harness: a fake Legion SDK that records every call.
+const calls = []
+const log = (name, ...a) => calls.push([name, ...a])
+const L = { settingCbs: {}, adStart: [], adEnd: [], events: [], chat: [], user: [] }
+window.__calls = calls
+window.__fake = L
+const bubbles = []
+window.Legion = { SDK: {
+  init: (o) => log('init', o),
+  environment: () => ({ apiUrl: 'https://api.example.test', playUrl: '', staticUrl: '' }),
+  game: { loadingStep: (t) => log('loadingStep', t), loadingEnd: () => log('loadingEnd'), gameplayStart: () => log('gameplayStart'), gameplayEnd: () => log('gameplayEnd'), registerFeature: (f) => log('registerFeature', f), updateRoom: (r) => log('updateRoom', r), playerJoined: (n) => log('playerJoined', n), playerInRoom: (n) => log('playerInRoom', n) },
+  settings: { listen: (k, cb) => { L.settingCbs[k] = cb; log('settings.listen', k); return () => {} }, triggerAll: () => { for (const k in L.settingCbs) L.settingCbs[k](undefined) } },
+  auth: { onUserChanged: (cb) => { L.user.push(cb); cb(null); return () => {} }, getUser: () => null, getToken: async () => '', getGuest: () => null },
+  player: { onEvent: (cb) => { L.events.push(cb); return () => {} } },
+  ads: { onBreakStart: (cb) => L.adStart.push(cb), onBreakEnd: (cb) => L.adEnd.push(cb), declareScreens: (s) => log('ads.declareScreens', Object.keys(s)), screen: (t) => { log('ads.screen', t); return { hide: () => log('ads.hide') } }, hideScreen: () => log('ads.hideScreen'), isAvailable: () => true, showRewarded: async (p) => { log('ads.showRewarded', p); return { status: window.__adStatus || 'completed' } } },
+  leaderboard: { define: (b) => log('leaderboard.define', b.map((x) => x.id)) },
+  chat: { onMessage: (cb) => { L.chat.push(cb); return () => {} }, bubbleText: (m) => m.text, attachBubble: (THREE, root, text, o) => { log('chat.attachBubble', text, o.height, typeof THREE.Sprite); const b = { remove: () => log('bubble.remove') }; return b } },
+  ui: { onReservedAreasChange: (cb) => { cb([]); return () => {} } },
+  portal: { showMenu: () => log('showMenu'), requestFullscreen() {}, exitFullscreen() {} },
+  avatar: {},
+  net: { resolveEndpoint: async () => { throw new Error('no matchmaker in this test') } },
+} }
+</script>
+<script type="module" src="./src/main.js"></script>
+</body></html>
