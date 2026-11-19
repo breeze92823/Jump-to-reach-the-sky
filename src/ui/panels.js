@@ -6,8 +6,9 @@
 // slightly high price). Windows refresh a few times a second through
 // `refresh`, which only touches the DOM when something actually changed, so
 // buttons keep their pressed state and nothing is rebuilt per tick.
-import { CREATURES, DAILY, INDEX_BONUS, ITEMS, PLAYTIME, RARITIES, UPGRADES, VARIANTS } from '../config.js'
-import { canAfford, doRebirth, game, incomeOf, indexBonus, indexFound, rebirthMults, rebirthReq, rebirthSkipPrice, save, sellValue, spend } from '../game/state.js'
+import { ASCENDED, BASE_LEVELS, CREATURES, DAILY, ECONOMY, FUSION, INDEX_BONUS, ITEMS, LUCKY_BLOCKS, PLAYTIME, RARITIES, UPGRADES, VARIANTS, ZONES } from '../config.js'
+import { fusionGroups, fusionMinutes, fusionPrice, fusionState } from '../game/fusion.js'
+import { ascEffect, ascendedUnlocked, ascLevel, ascPerk, ascPrice, baseBuildState, bus, buyAscended, nextBaseLevel, startBaseBuild, canAfford, doRebirth, game, incomeOf, indexBonus, indexFound, luckyPrice, rebirthMults, rebirthReq, rebirthSkipPrice, save, sellValue, spend } from '../game/state.js'
 import { DAILY_CYCLE, checkStreak, claimDaily, dailyReady, dailyWait } from '../game/daily.js'
 import { RARITY_COLORS, SPECIES_LIST, SPECIES_NAMES, VARIANT_NAMES } from '../hub/creatures.js'
 import { short } from '../hub/paint.js'
@@ -445,7 +446,7 @@ export function createPanels({ openWindow, closeWindow, btn, thumb, toast, hub, 
         const b = col()
         const top = h('div', 'rb-top')
         top.append(a, h('div', 'rb-arrow', ICONS.arrow), b)
-        const box = h('div', 'rb-box', `<div class="rb-warn ol">Rebirth resets your jump power</div><div class="rb-bar"><i></i><span class="ol"></span></div>`)
+        const box = h('div', 'rb-box', `<div class="rb-warn ol">Rebirth resets your jump power and money</div><div class="rb-bar"><i></i><span class="ol"></span></div>`)
         const act = h('div', 'rb-actions')
         const rb = btn('pbtn green rb-go', `<span class="rb-ico">${ICONS.rebirth}</span><span class="pv ol">Rebirth</span>`, () => {
           if (!doRebirth(false)) {
@@ -503,6 +504,435 @@ export function createPanels({ openWindow, closeWindow, btn, thumb, toast, hub, 
           rb.classList.toggle('ready', ready)
           skip.querySelector('.pv').textContent = `SKIP! - ${money(rebirthSkipPrice())}`
           skip.classList.toggle('cant', !canAfford(rebirthSkipPrice()))
+        }
+      },
+    })
+  }
+
+  // =========================================================================================
+  // Lucky Blocks (walk up to the "?" heap): buy a block for money and break it open, or open
+  // the ones you own (free ones come from Jump Crystals).
+  // =========================================================================================
+  let luckyBusy = false
+  function openLucky() {
+    openWindow('Lucky Blocks', {
+      theme: 'yellow',
+      icon: ICONS.luckyBlock('lucky'),
+      cls: 'w-lucky',
+      build(body, w) {
+        const info = btn('info-btn', ICONS.info, () =>
+          infoPop(body, 'Lucky Blocks', [
+            'Break a block for a random prize: <b>cash</b>, <b>Jump Power</b>, <b>boosts</b> or <b>brainrots</b>.',
+            'Bigger blocks can hold brainrots from zones <b>you have not reached yet</b>!',
+            `Every <b>${LUCKY_BLOCKS.freeEvery} Jump Crystals</b> you pick up give you a free Lucky Block.`,
+            'Prices grow with your base income. Money only.',
+          ]),
+        )
+        w.el.append(info)
+        const grid = h('div', 'rgrid lucky')
+        const cards = Object.entries(LUCKY_BLOCKS.tiers).map(([tier, T]) => {
+          const c = h('div', `rcard lb lb-${tier}`, `<div class="lb-shine"></div><div class="r-title ol${T.name.length > 12 ? ' long' : ''}">${T.name}</div><div class="r-art">${ICONS.luckyBlock(tier)}</div><div class="lb-owned ol"></div><div class="r-act"></div>`)
+          const i = btn('r-info', ICONS.info, () => {
+            const o = rewards.luckyOdds(tier)
+            infoPop(body, `${T.name} odds`, o.map((x) => `<b>${x.pct}</b> ${x.what}`))
+          })
+          c.querySelector('.r-art').append(i)
+          const act = c.querySelector('.r-act')
+          const openBtn = btn('rbtn claim lb-open', '<span class="ol">Open!</span><i class="bang">!</i>', () => run(tier, c))
+          const buy = priceButton('green lb-buy', '', () => luckyPrice(tier), (price) => {
+            if (luckyBusy || !spend(price)) return
+            game.luckyBlocks[tier]++
+            sfx.buy()
+            juice.bump(c, 1.06)
+            run(tier, c)
+          })
+          act.append(openBtn, buy)
+          grid.append(c)
+          return { tier, c, openBtn, buy, owned: c.querySelector('.lb-owned'), key: '' }
+        })
+        body.append(grid)
+        // Footer: progress toward the next free block.
+        const prog = h('div', 'lb-prog', `<div class="lb-pi">${ICONS.crystal}</div><div class="lb-bar"><div class="lb-fill"></div><div class="lb-txt ol"></div></div><div class="lb-pi">${ICONS.luckyBlock('lucky')}</div>`)
+        w.foot.append(prog)
+        const fill = prog.querySelector('.lb-fill')
+        const txt = prog.querySelector('.lb-txt')
+        let shownProg = -1
+        // Open one block of a tier you own: the show, then the card bounces.
+        async function run(tier, c) {
+          if (luckyBusy || game.luckyBlocks[tier] < 1) return
+          luckyBusy = true
+          game.luckyBlocks[tier]--
+          save()
+          w.refresh()
+          try {
+            await rewards.openLucky(tier)
+          } finally {
+            luckyBusy = false
+          }
+          celebrate(c.querySelector('.r-art'), '#ffe14a', 20)
+          save()
+          w.refresh()
+        }
+        w.refresh = () => {
+          for (const o of cards) {
+            const n = game.luckyBlocks[o.tier] || 0
+            const key = `${n}`
+            if (key !== o.key) {
+              const more = o.key !== '' && n > Number(o.key)
+              o.key = key
+              o.owned.textContent = n ? `x${n}` : ''
+              o.openBtn.style.display = n ? '' : 'none'
+              o.c.classList.toggle('has', n > 0)
+              if (more) {
+                juice.bump(o.c, 1.08)
+                celebrate(o.c.querySelector('.r-art'), '#ffe14a', 16)
+              }
+            }
+            o.buy.refresh()
+          }
+          const p = game.crystals % LUCKY_BLOCKS.freeEvery
+          if (p !== shownProg) {
+            shownProg = p
+            fill.style.width = `${(p / LUCKY_BLOCKS.freeEvery) * 100}%`
+            txt.textContent = `${p}/${LUCKY_BLOCKS.freeEvery} Jump Crystals to a free block`
+          }
+        }
+      },
+    })
+  }
+
+  // =========================================================================================
+  // Fusion Machine (walk up to the machine on the east wall): 3 of the same brainrot and
+  // variant -> 1 of the next variant after a real-time build. The machine (hub.fusion) takes
+  // the brainrots from your hands / base and runs the 3D side; this is the menu.
+  // =========================================================================================
+  const vName = (v) => (v === 'normal' ? '<span class="vt v-normal">Normal</span>' : variantHtml(v))
+  let fuseBusy = false
+  function openFusion() {
+    openWindow('Fusion Machine', {
+      theme: 'pink',
+      icon: ICONS.fusion,
+      cls: 'w-fuse',
+      build(body, w) {
+        const info = btn('info-btn', ICONS.info, () =>
+          infoPop(body, 'Fusion Machine', [
+            `Put <b>${FUSION.need}</b> of the same brainrot (same variant) in to make <b>1</b> of the next variant.`,
+            'Normal → Golden → Diamond → Rainbow → Lava. Each one earns more money.',
+            'They come from your hands first, then your base.',
+            'The machine keeps working while you are away. Money only.',
+          ]),
+        )
+        w.el.append(info)
+        const head = h('div', 'fu-head')
+        const list = h('div', 'fu-list')
+        body.append(head, list)
+        let headKey = ''
+        let listKey = ''
+        let bar = null
+        let left = null
+        let buttons = []
+        const img = (species, variant, cls = '') => {
+          const i = h('img', cls)
+          i.alt = ''
+          requestAnimationFrame(() => (i.src = thumb(species, variant)))
+          return i
+        }
+        async function doClaim(b) {
+          if (fuseBusy) return
+          const out = hub.fusion.claim()
+          if (!out) return
+          fuseBusy = true
+          sfx.claim()
+          celebrate(b, '#ffd23a', 24)
+          try {
+            await rewards.openFusion({ species: out.species, from: out.from, to: out.variant })
+          } finally {
+            fuseBusy = false
+          }
+          save()
+          w.refresh()
+        }
+        function renderHead(f) {
+          head.innerHTML = ''
+          bar = left = null
+          head.className = `fu-head ${!f ? 'idle' : f.done ? 'done' : 'busy'}`
+          if (!f) {
+            head.innerHTML = `<div class="fu-tip ol">Put <b>${FUSION.need}</b> of the same brainrot in to get <b>1</b> of the next variant!</div><div class="fu-chain">${['normal', 'golden', 'diamond', 'rainbow', 'lava'].map((v) => vName(v)).join('<i class="fu-arr">➜</i>')}</div>`
+            return
+          }
+          const ins = h('div', 'fu-ins')
+          for (let k = 0; k < FUSION.need; k++) ins.append(img(f.species, f.from, 'fu-in'))
+          const outBox = h('div', 'fu-out')
+          outBox.append(img(f.species, f.to, 'fu-res'))
+          const meta = h('div', 'fu-meta', `<div class="fu-name ol">${SPECIES_NAMES[f.species]}</div><div class="fu-var">${vName(f.to)}</div><div class="fu-inc ol">+${money(incomeOf({ species: f.species, variant: f.to }))}/s</div>`)
+          const arrow = h('div', 'fu-arrow ol', '➜')
+          head.append(ins, arrow, outBox, meta)
+          if (f.done) {
+            const b = btn('rbtn claim fu-claim', '<span class="ol">Claim!</span><i class="bang">!</i>', () => doClaim(b))
+            head.append(b)
+          } else {
+            const wrap = h('div', 'fu-prog', '<div class="fu-bar"><div class="fu-fill"></div><div class="fu-left ol"></div></div>')
+            head.append(wrap)
+            bar = wrap.querySelector('.fu-fill')
+            left = wrap.querySelector('.fu-left')
+          }
+        }
+        function renderList(groups, busy) {
+          list.innerHTML = ''
+          buttons = []
+          if (!groups.length) {
+            list.append(h('div', 'fu-empty ol', `Bring <b>${FUSION.need}</b> of the same brainrot (same variant) to your base or hands, and they show up here!`))
+            return
+          }
+          for (const g of groups) {
+            const ready = g.count >= FUSION.need
+            const row = h('div', `fu-row${ready ? ' ready' : ''}`)
+            const a = h('div', 'fu-side')
+            a.append(img(g.species, g.variant, 'fu-thumb'))
+            a.append(h('div', 'fu-txt', `<div class="fu-name ol">${SPECIES_NAMES[g.species]}</div>${vName(g.variant)}<div class="fu-count ol">${Math.min(g.count, 99)}/${FUSION.need}</div>`))
+            const b2 = h('div', 'fu-side')
+            b2.append(img(g.species, g.to, 'fu-thumb out'))
+            b2.append(h('div', 'fu-txt', `${vName(g.to)}<div class="fu-inc ol">+${money(incomeOf({ species: g.species, variant: g.to }))}/s</div>`))
+            const act = h('div', 'fu-act')
+            if (!ready) act.append(h('div', 'rbtn wait', `<span class="ol">Need ${FUSION.need - g.count} more</span>`))
+            else if (busy) act.append(h('div', 'rbtn wait', '<span class="ol">Machine busy</span>'))
+            else {
+              const pb = priceButton('pink fu-go', `${fusionMinutes(g.to)}m`, () => fusionPrice(g.species, g.to), (price, b) => {
+                if (!hub.fusion.start(g.species, g.variant)) {
+                  sfx.ui('error')
+                  juice.shake(b)
+                  toast('Could not start: bring the brainrots to your base or hands.', 'error')
+                  return
+                }
+                sfx.buy()
+                celebrate(b, '#ff7af2', 26)
+                juice.flash('#e8c8ff', 260)
+                toast(`Fusing! Your ${VARIANT_NAMES[g.to]} ${SPECIES_NAMES[g.species]} is ready in ${fusionMinutes(g.to)} min.`, 'good')
+                w.refresh()
+              })
+              act.append(pb)
+              buttons.push(pb)
+            }
+            row.append(a, h('div', 'fu-arrow ol', '➜'), b2, act)
+            list.append(row)
+          }
+        }
+        w.refresh = () => {
+          const f = fusionState()
+          const hk = !f ? 'idle' : `${f.done ? 'done' : 'busy'}|${f.species}|${f.from}|${f.to}`
+          if (hk !== headKey) {
+            headKey = hk
+            renderHead(f)
+          }
+          if (f && !f.done && bar) {
+            bar.style.width = `${(f.progress * 100).toFixed(1)}%`
+            const t = `${clock(f.left)} left`
+            if (left.textContent !== t) left.textContent = t
+          }
+          const groups = fusionGroups(2)
+          const lk = `${!!game.fusion}|${groups.map((g) => `${g.species}.${g.variant}.${g.count}`).join(',')}`
+          if (lk !== listKey) {
+            listKey = lk
+            renderList(groups, !!game.fusion)
+          }
+          for (const b of buttons) b.refresh()
+        }
+      },
+    })
+  }
+
+  // =========================================================================================
+  // Ascended Shop (the tarp stall in the SHOPS row): permanent perks for money, open at
+  // ASCENDED.unlock.rebirths. Before that the window is a locked preview of what is inside.
+  // =========================================================================================
+  const ascEffectText = (id, lv) => {
+    const e = ascEffect(id, lv)
+    switch (id) {
+      case 'autoCollect':
+        return lv ? 'Active' : 'Off'
+      case 'magnet':
+        return lv ? `Active (${ascPerk('magnet').radius} m)` : 'Off'
+      case 'mastery':
+        return `+${Math.round(e * 100)}% training`
+      case 'fastFusion':
+        return `${Math.round(e * 100)}% faster fusion`
+      case 'golden':
+        return `+${Math.round(e * 100)}% luck`
+      case 'vault':
+        return `${Math.round(ECONOMY.offlineCap / 3600 + e)} h offline income`
+      default:
+        return ''
+    }
+  }
+  function openAscended() {
+    openWindow('Ascended Shop', {
+      theme: 'purple',
+      icon: ICONS.crown,
+      cls: 'w-asc',
+      build(body, w) {
+        const ribbon = h('div', 'asc-ribbon')
+        const grid = h('div', 'asc-grid')
+        body.append(ribbon, grid)
+        const cards = ASCENDED.perks.map((p) => {
+          const c = h('div', `asc-card a-${p.id}`, `<div class="asc-glow"></div><div class="asc-icon">${ICONS.asc[p.id]}</div><div class="asc-name ol">${p.name}</div><div class="asc-pips"></div><div class="asc-desc">${p.text}</div><div class="asc-eff ol"></div><div class="asc-act"></div>`)
+          c.style.setProperty('--pc', p.color)
+          const pips = c.querySelector('.asc-pips')
+          if (p.max > 1) for (let i = 0; i < p.max; i++) pips.append(h('i', 'pip'))
+          else pips.append(h('span', 'once ol', 'One-time unlock'))
+          grid.append(c)
+          return { p, c, pips: [...pips.querySelectorAll('.pip')], eff: c.querySelector('.asc-eff'), act: c.querySelector('.asc-act'), icon: c.querySelector('.asc-icon'), key: '', btn: null }
+        })
+        const buy = (o, b) => {
+          const lv = buyAscended(o.p.id)
+          if (!lv) {
+            sfx.ui('error')
+            juice.shake(b)
+            return
+          }
+          const maxed = lv >= o.p.max
+          sfx.ascendBuy(lv, maxed)
+          celebrate(o.icon, o.p.color, 30 + lv * 3)
+          juice.ring(o.icon, '#ffe14a', 260)
+          juice.floatText(o.icon, o.p.max > 1 ? `Lv ${lv}!` : 'Unlocked!', o.p.color, 1.2)
+          juice.bump(o.c, 1.08)
+          juice.flash('#f0d8ff', 220)
+          bus.emit('ascendedBuy', { id: o.p.id, level: lv })
+          if (o.p.max === 1 || maxed) showBanner({ title: `${o.p.name.toUpperCase()}!`, sub: o.p.max === 1 ? o.p.text : 'Maxed out!', color: o.p.color })
+          o.c.classList.add('pop')
+          setTimeout(() => o.c.classList.remove('pop'), 700)
+          w.refresh()
+        }
+        let ribbonKey = ''
+        w.refresh = () => {
+          const open = ascendedUnlocked()
+          const rk = `${open}|${game.rebirths}`
+          if (rk !== ribbonKey) {
+            ribbonKey = rk
+            const need = ASCENDED.unlock.rebirths
+            ribbon.className = `asc-ribbon${open ? ' open' : ''}`
+            ribbon.innerHTML = open
+              ? `<div class="asc-rt ol">Permanent perks: a rebirth keeps them all!</div>`
+              : `<div class="asc-lock">${ICONS.lock}</div><div class="asc-rt ol">Unlocks at <b>${need} Rebirths</b> (you have ${game.rebirths})</div><div class="asc-bar"><div class="asc-fill" style="width:${Math.min(100, (game.rebirths / need) * 100)}%"></div></div>`
+            w.el.classList.toggle('locked', !open)
+          }
+          for (const o of cards) {
+            const lv = ascLevel(o.p.id)
+            const key = `${lv}|${open}`
+            if (key !== o.key) {
+              o.key = key
+              o.pips.forEach((pp, i) => pp.classList.toggle('on', i < lv))
+              const maxed = lv >= o.p.max
+              o.eff.innerHTML = maxed || !open ? ascEffectText(o.p.id, lv) : `${ascEffectText(o.p.id, lv)} <b>➜ ${ascEffectText(o.p.id, lv + 1)}</b>`
+              o.c.classList.toggle('maxed', maxed)
+              o.c.classList.toggle('owned', lv > 0)
+              o.act.innerHTML = ''
+              o.btn = null
+              if (!open) o.act.append(h('div', 'rbtn wait', `<span class="ol">${ASCENDED.unlock.rebirths} Rebirths</span>`))
+              else if (maxed) o.act.append(h('div', 'rbtn done', `<span class="ol">${o.p.max > 1 ? 'MAXED' : 'Owned'}</span>`))
+              else {
+                o.btn = priceButton('green asc-buy', o.p.max > 1 ? `Lv ${lv + 1}` : '', () => ascPrice(o.p.id), (price, b) => buy(o, b))
+                o.act.append(o.btn)
+              }
+            }
+            o.btn?.refresh()
+          }
+        }
+      },
+    })
+  }
+
+  // =========================================================================================
+  // Base Level (the core in front of your base): pay, wait for the build, and the next lane
+  // wall opens; every level also adds money. The 3D core runs the build show.
+  // =========================================================================================
+  // Zone colours as text on the dark panels (Secret's near-black is lightened).
+  const readable = (c = '#fff') => (c === '#34344a' ? '#b8b8f0' : c)
+  const gemSvg = (c) => `<svg viewBox="0 0 100 100"><path d="M50 6l34 44-34 44-34-44z" fill="${c}" stroke="#0d1a3a" stroke-width="5" stroke-linejoin="round"/><path d="M50 6l-12 44 12 44 12-44zM16 50h68" fill="none" stroke="rgba(13,26,58,0.45)" stroke-width="3"/><path d="M50 6L38 50h24z" fill="rgba(255,255,255,0.45)"/></svg>`
+  function openBase() {
+    openWindow('Base Level', {
+      theme: 'blue',
+      icon: gemSvg('#7ff0ff'),
+      cls: 'w-base',
+      build(body, w) {
+        const head = h('div', 'bl-head')
+        const ladder = h('div', 'bl-ladder')
+        body.append(head, ladder)
+        const rows = BASE_LEVELS.levels.map((l, k) => {
+          const lv = k + 1
+          const zone = ZONES[lv]
+          const r = h('div', 'bl-row', `<div class="bl-gem">${gemSvg(BASE_LEVELS.colors[lv])}</div><div class="bl-lv ol">Lv ${lv}</div><div class="bl-zone ol" style="color:${readable(zone?.color)}">Opens ${zone?.name ?? ''}</div><div class="bl-meta ol">$${short(l.cost)} · ${l.minutes} min</div><div class="bl-st ol"></div>`)
+          ladder.append(r)
+          return { lv, r, st: r.querySelector('.bl-st'), key: '' }
+        })
+        let headKey = ''
+        let bar = null
+        let left = null
+        let btnBuild = null
+        function renderHead(state) {
+          head.innerHTML = ''
+          bar = left = btnBuild = null
+          const lv = game.baseLevel
+          const next = nextBaseLevel()
+          const b = baseBuildState()
+          head.className = `bl-head ${state}`
+          const cur = h('div', 'bl-cur', `<div class="bl-big">${gemSvg(BASE_LEVELS.colors[lv])}</div><div><div class="bl-title ol">Base Level ${lv}</div><div class="bl-bonus ol">+${Math.round(lv * BASE_LEVELS.income * 100)}% money</div></div>`)
+          head.append(cur)
+          if (state === 'max') {
+            head.append(h('div', 'bl-msg ol', 'MAX LEVEL! Every wall is open.'))
+            return
+          }
+          const zone = ZONES[next.level]
+          const info = h('div', 'bl-next', `<div class="bl-nt ol">Level ${next.level} opens <b style="color:${readable(zone.color)}">${zone.name}</b></div><div class="bl-nm ol">+${Math.round(BASE_LEVELS.income * 100)}% money · builds in ${next.minutes} min (even while you are away)</div>`)
+          head.append(info)
+          if (state === 'building') {
+            const wrap = h('div', 'bl-prog', `<div class="bl-bar"><div class="bl-fill"></div><div class="bl-left ol"></div></div>`)
+            head.append(wrap)
+            bar = wrap.querySelector('.bl-fill')
+            left = wrap.querySelector('.bl-left')
+          } else {
+            btnBuild = priceButton('green bl-build', `${next.minutes}m`, () => nextBaseLevel()?.cost ?? null, (price, btn2) => {
+              if (!startBaseBuild()) {
+                sfx.ui('error')
+                juice.shake(btn2)
+                return
+              }
+              sfx.upgrade(game.baseLevel * 3)
+              sfx.buy()
+              celebrate(btn2, '#ffd23a', 26)
+              juice.flash('#fff3c0', 220)
+              bus.emit('baseBuild', next.level)
+              toast(`Building Base Level ${next.level}! Ready in ${next.minutes} min.`, 'good')
+              w.refresh()
+            })
+            head.append(btnBuild)
+          }
+        }
+        w.refresh = () => {
+          const b = baseBuildState()
+          const state = !nextBaseLevel() ? 'max' : b ? 'building' : 'idle'
+          const hk = `${state}|${game.baseLevel}`
+          if (hk !== headKey) {
+            const leveled = headKey && !headKey.endsWith(`|${game.baseLevel}`)
+            headKey = hk
+            renderHead(state)
+            if (leveled) {
+              celebrate(head.querySelector('.bl-big'), '#ffd23a', 40)
+              juice.bump(head, 1.05)
+            }
+          }
+          if (bar && b) {
+            bar.style.width = `${(b.progress * 100).toFixed(1)}%`
+            const t = `${clock(b.left)} left`
+            if (left.textContent !== t) left.textContent = t
+          }
+          btnBuild?.refresh()
+          for (const o of rows) {
+            const st = o.lv <= game.baseLevel ? 'done' : b && b.level === o.lv ? 'building' : o.lv === game.baseLevel + 1 ? 'next' : 'locked'
+            if (st === o.key) continue
+            o.key = st
+            o.r.className = `bl-row ${st}`
+            o.st.textContent = st === 'done' ? 'Built' : st === 'building' ? 'Building' : st === 'next' ? 'Next' : ''
+          }
         }
       },
     })
@@ -737,6 +1167,10 @@ export function createPanels({ openWindow, closeWindow, btn, thumb, toast, hub, 
     openRebirth,
     openPlaytime,
     openDaily,
+    openLucky,
+    openFusion,
+    openAscended,
+    openBase,
     anyPlayReady,
     anyDailyReady,
     rebirthReady: () => game.jumpPower >= rebirthReq(),

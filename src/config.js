@@ -90,8 +90,8 @@ export const LANE = {
   perZone: 6, // brainrots alive on each terrace
   crystalsPerZone: 2, // Jump Crystals on each terrace
   despawn: [45, 80], // s a brainrot waits on the lane before it vanishes
-  crystalRespawn: 35, // s
-  crystalGain: 0.04, // of the next zone's recommended jump power
+  crystalRespawn: 60, // s
+  crystalGain: 0.01, // of the next zone's recommended jump power
   pickupRadius: 1.8, // m from the feet that grabs a brainrot with empty hands
   viewDistance: 95, // m past which lane brainrots are not drawn
   shadowDistance: 28, // m within which they cast shadows
@@ -147,10 +147,10 @@ export const TRAINING = {
   hop: 6.4, // m/s of the training hop
   jumpGain: 1, // Jump Power per manual jump anywhere (times the training multipliers)
   pads: [
-    { mult: 250, color: '#ffd21f', price: 150e6 },
-    { mult: 50, color: '#e93cf0', price: 8e6 },
-    { mult: 10, color: '#1ee6ff', price: 120e3 },
-    { mult: 3, color: '#3dff4f', price: 2500 },
+    { mult: 30, color: '#ffd21f', price: 150e6 },
+    { mult: 12, color: '#e93cf0', price: 8e6 },
+    { mult: 5, color: '#1ee6ff', price: 120e3 },
+    { mult: 2, color: '#3dff4f', price: 2500 },
     { mult: 1, color: '#e9eef5', price: 0 },
   ],
 }
@@ -164,7 +164,7 @@ export const ECONOMY = {
   offlineRate: 0.5,
   // Rebirths, Playtime and Daily rewards have their own blocks (REBIRTH, PLAYTIME, DAILY).
   slots: { start: 6, total: 12, prices: [15e3, 75e3, 400e3, 2.5e6, 15e6, 100e6] },
-  skipWall: { base: 1500, growth: 13 }, // price of the wall up to zone i = base * growth^(i - 1)
+  skipWall: { base: 5000, growth: 20 }, // price of the wall up to zone i = base * growth^(i - 1)
 }
 // The shop (HUD Store window + the offers on the right). Money prices (slightly high).
 export const STORE = {
@@ -194,24 +194,47 @@ export const UPGRADES = {
 // every jump / training hop (before multipliers). price 0 = owned from the start;
 // price null = not for sale (a reward). -----------------------------------------
 export const ITEMS = [
-  { id: 'box', name: 'Box', rarity: 'Common', jump: 2, price: 0 },
-  { id: 'backpack', name: 'Backpack', rarity: 'Common', jump: 5, price: 15e3 },
-  { id: 'sack', name: 'Gift Sack', rarity: 'Uncommon', jump: 15, price: 250e3 },
-  { id: 'jetpack', name: 'Jetpack', rarity: 'Rare', jump: 50, price: 4e6 },
-  { id: 'spring', name: 'Spring Pack', rarity: 'Epic', jump: 180, price: 60e6 },
-  { id: 'crimson', name: 'Crimson Glider', rarity: 'Exclusive', jump: 400, price: null, note: 'Daily Reward Day 5' },
-  { id: 'rocket', name: 'Rocket', rarity: 'Legendary', jump: 700, price: 900e6 },
-  { id: 'wings', name: 'Angel Wings', rarity: 'Mythic', jump: 2500, price: 15e9 },
+  { id: 'box', name: 'Box', rarity: 'Common', jump: 1, price: 0 },
+  { id: 'backpack', name: 'Backpack', rarity: 'Common', jump: 2, price: 15e3 },
+  { id: 'sack', name: 'Gift Sack', rarity: 'Uncommon', jump: 4, price: 250e3 },
+  { id: 'jetpack', name: 'Jetpack', rarity: 'Rare', jump: 8, price: 4e6 },
+  { id: 'spring', name: 'Spring Pack', rarity: 'Epic', jump: 20, price: 60e6 },
+  { id: 'crimson', name: 'Crimson Glider', rarity: 'Exclusive', jump: 40, price: null, note: 'Daily Reward Day 5' },
+  { id: 'rocket', name: 'Rocket', rarity: 'Legendary', jump: 70, price: 900e6 },
+  { id: 'wings', name: 'Angel Wings', rarity: 'Mythic', jump: 250, price: 15e9 },
 ]
 
 // --- Rebirths (Rebirths window): the requirement is Jump Power; a rebirth resets
-// Jump Power only. Rebirth n gives money x money[n] and training x jump[n] (past
-// the table: x1.25 / x1.7 per rebirth). SKIP pays money instead and keeps Jump Power.
+// Jump Power and money (base, brainrots, pads, items, perks and Base Level stay).
+// Rebirth n gives money x money[n] and training x jump[n] (past the table: x1.25 /
+// x1.7 per rebirth). SKIP pays money instead and keeps Jump Power (and the money left).
+// Pacing: tuned with the Base Level gates below so the fastest climb to Divine
+// takes about 2 h 15 min (see the economy review's simulation).
 export const REBIRTH = {
-  req: { base: 1500, growth: 5 }, // jump power for rebirth n+1 = base * growth^n
+  req: { base: 5000, growth: 6 }, // jump power for rebirth n+1 = base * growth^n
   skip: { base: 400e3, growth: 9 }, // money to skip rebirth n+1 = base * growth^n (slightly high)
-  money: [1, 2, 3, 4, 5, 6, 8, 10, 13, 16, 20, 25],
-  jump: [1, 2, 5, 10, 20, 40, 75, 125, 200, 350, 600, 1000],
+  money: [1, 1.25, 1.5, 1.75, 2, 2.5, 3, 3.5, 4, 5, 6, 7],
+  jump: [1, 1.5, 2.25, 3.5, 5, 7.5, 11, 16, 24, 35, 50, 75],
+}
+
+// --- Base Level (the Base Upgrade core in front of your base, hub/baseCore.js) -----------------
+// levels[i] is Base Level i + 1: it costs `cost` money, then builds for `minutes` of real time
+// (it keeps building while you are away), and opens the wall into ZONES[i + 1] (a force field
+// blocks that wall, and its Skip Wall, until then). Every level built adds `income` to money.
+export const BASE_LEVELS = {
+  income: 0.1,
+  levels: [
+    { cost: 5e3, minutes: 1 },
+    { cost: 60e3, minutes: 2 },
+    { cost: 500e3, minutes: 3 },
+    { cost: 5e6, minutes: 4 },
+    { cost: 50e6, minutes: 6 },
+    { cost: 400e6, minutes: 8 },
+    { cost: 3e9, minutes: 10 },
+    { cost: 25e9, minutes: 12 },
+    { cost: 200e9, minutes: 14 },
+  ],
+  colors: ['#9aa0b0', '#4dca28', '#9be635', '#2fd3e6', '#3a7cf0', '#a04de6', '#ffb11f', '#ff4f9a', '#34344a', '#aeefff'], // the core's gem per level
 }
 
 // --- Index bonus: every `every` brainrots found adds `pct` to money. ----------------
@@ -251,12 +274,114 @@ export const CHESTS = {
   },
 }
 
+// --- Lucky Blocks (the "?" heap by the lane gap, hub/lucky.js + the Lucky Blocks window).
+// A block costs `seconds` of your base income (at least `min`), so it stays worth
+// opening as you grow; money only. Picking up `freeEvery` Jump Crystals gives a
+// free Lucky Block. Drops work like CHESTS, plus brainrots from a zone `ahead`
+// of the best one you reached (0 = that zone), at least `minVariant`, with
+// `luck` on the variant roll. ---------------------------------------------------------
+export const LUCKY_BLOCKS = {
+  freeEvery: 10,
+  tiers: {
+    lucky: {
+      name: 'Lucky Block',
+      seconds: 180,
+      min: 5e3,
+      drops: [
+        { kind: 'money', seconds: 240, min: 6e3, weight: 40 },
+        { kind: 'jump', share: 0.03, weight: 25 },
+        { kind: 'boost', boost: 'train2', minutes: 5, weight: 15 },
+        { kind: 'brainrot', ahead: 0, luck: 1.5, weight: 20 },
+      ],
+    },
+    super: {
+      name: 'Super Lucky Block',
+      seconds: 600,
+      min: 50e3,
+      drops: [
+        { kind: 'money', seconds: 720, min: 60e3, weight: 30 },
+        { kind: 'jump', share: 0.05, weight: 20 },
+        { kind: 'boost', boost: 'money2', minutes: 10, weight: 15 },
+        { kind: 'brainrot', ahead: 0, luck: 2.5, weight: 30 },
+        { kind: 'brainrot', ahead: 1, luck: 1, weight: 5 },
+      ],
+    },
+    rainbow: {
+      name: 'Rainbow Lucky Block',
+      seconds: 1800,
+      min: 500e3,
+      drops: [
+        { kind: 'money', seconds: 2100, min: 600e3, weight: 20 },
+        { kind: 'boost', boost: 'lucky', minutes: 15, weight: 15 },
+        { kind: 'brainrot', ahead: 0, luck: 4, minVariant: 'golden', weight: 45 },
+        { kind: 'brainrot', ahead: 1, luck: 2, minVariant: 'golden', weight: 17 },
+        { kind: 'brainrot', ahead: 2, luck: 2, minVariant: 'golden', weight: 3 },
+      ],
+    },
+  },
+}
+
+// --- Fusion Machine (east wall, hub/machines.js + the Fusion Machine window). Put
+// `need` brainrots of the same species and variant in, get one of the next variant
+// (normal -> golden -> diamond -> rainbow -> lava) after a real-time build (it keeps
+// going while you are away). The fee is `seconds` of the result's income (at least
+// `min`), money only. Unlocked at `unlock.rebirths` rebirths. Reward-only brainrots
+// (Absolute) cannot be fused. -------------------------------------------------------------
+export const FUSION = {
+  unlock: { rebirths: 2 },
+  need: 3,
+  steps: {
+    golden: { seconds: 60, min: 2e3, minutes: 2 },
+    diamond: { seconds: 120, min: 10e3, minutes: 5 },
+    rainbow: { seconds: 300, min: 50e3, minutes: 10 },
+    lava: { seconds: 600, min: 250e3, minutes: 15 },
+  },
+}
+
+// --- Ascended Shop (the tarp-covered stall in the SHOPS row, opens at `unlock.rebirths`).
+// Permanent perks bought with money (a rebirth keeps them). Level n+1 costs
+// base * growth^n; max 1 = a one-time unlock. `per` is the effect per level.
+// Walking up before the unlock previews the shop, locked. ----------------------------------
+export const ASCENDED = {
+  unlock: { rebirths: 4 },
+  perks: [
+    { id: 'autoCollect', name: 'Auto Collect', max: 1, base: 50e6, growth: 1, color: '#5dff4a', text: 'Your base pays you anywhere: no more walking onto the collect pads.' },
+    { id: 'magnet', name: 'Crystal Magnet', max: 1, base: 20e6, growth: 1, radius: 8, color: '#e07bff', text: 'Jump Crystals within 8 m fly to you.' },
+    { id: 'mastery', name: 'Training Mastery', max: 10, base: 10e6, growth: 3, per: 0.1, color: '#3fb7ff', text: '+10% Jump Power from training and jumps per level.' },
+    { id: 'fastFusion', name: 'Fast Fusion', max: 5, base: 15e6, growth: 3, per: 0.08, color: '#ff7af2', text: 'Fusion Machine builds 8% faster per level.' },
+    { id: 'golden', name: 'Golden Touch', max: 5, base: 25e6, growth: 3, per: 0.1, color: '#ffd23a', text: '+10% luck for rare variants per level.' },
+    { id: 'vault', name: 'Bigger Vault', max: 3, base: 200e6, growth: 5, per: 1, color: '#ff9a3a', text: '+1 hour of income banked while you are away per level.' },
+  ],
+}
+
+// --- Hub events (game/events.js, hub/events.js, the JOIN EVENT billboard, the HUD event chip).
+// On the SERVER's clock (net.js serverNow), so every player in a room sees the same event: a new
+// one starts every `every` minutes and runs `length` minutes, taking turns through `list`.
+// rain: brainrots fall around you every `every` s (from your best zone or the one below,
+// variant luck x`luck`), each lasting `life` s. crystal: crystals give x`gain` and come back
+// in `respawn` of the time. lava: x`luck` on every rare-variant roll. golden: Fusion Machine
+// fee x`fee` and build time x`time`, Lucky Blocks x`lucky` price. -----------------------------------
+export const EVENTS = {
+  every: 20,
+  length: 4,
+  list: [
+    { id: 'rain', name: 'Brainrot Rain', color: '#5ad0ff', text: 'Brainrots fall from the sky around you. Grab them!' },
+    { id: 'crystal', name: 'Crystal Storm', color: '#e07bff', text: 'Jump Crystals give double and come back 3x faster.' },
+    { id: 'lava', name: 'Lava Rush', color: '#ff7a1a', text: 'Triple luck for rare variants everywhere.' },
+    { id: 'golden', name: 'Golden Machine', color: '#ffd23a', text: 'Fusion half price and twice as fast, Lucky Blocks 25% off.' },
+  ],
+  rain: { every: 2.2, life: 22, luck: 2, radius: [5, 16] },
+  crystal: { gain: 2, respawn: 0.33 },
+  lava: { luck: 3 },
+  golden: { fee: 0.5, time: 0.5, lucky: 0.75 },
+}
+
 // --- Playtime Rewards (this session's play time, in minutes). The reference's
 // premium-currency reward is a Lucky Potion here. -------------------------------------
 export const PLAYTIME = [
   { minutes: 0, kind: 'boost', boost: 'jump30', boostMinutes: 10, title: 'Jump Power bonus', art: 'potionBlue' },
   { minutes: 1, kind: 'chest', chest: 'wood' },
-  { minutes: 3, kind: 'money', seconds: 120, min: 120e3 },
+  { minutes: 3, kind: 'money', seconds: 120, min: 15e3 },
   { minutes: 5, kind: 'chest', chest: 'red' },
   { minutes: 8, kind: 'boost', boost: 'lucky', boostMinutes: 10, title: 'Lucky Potion', art: 'potionPink' },
   { minutes: 12, kind: 'chest', chest: 'red' },

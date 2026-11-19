@@ -26,9 +26,11 @@ function spatial(x, y, z) {
   const pan = ((dx / len) * Math.cos(listener.yaw) - (dz / len) * Math.sin(listener.yaw)) * Math.min(1, d / 4) * 0.85
   return { g: g * Math.min(1, (AUDIO.far - d) / 15), pan }
 }
-// Options for a one-shot at an optional world position (null = not audible).
+// Options for a one-shot at an optional world position (null = not audible). With no position
+// (UI sounds, e.g. sfx.whoosh(null) when a window opens) it plays centred at full level: `k` must
+// be a number, or `0.06 * Math.min(1, o.k * 2)` is NaN and Web Audio throws on the gain ramp.
 function at(pos, base = {}) {
-  if (!pos) return { ...base }
+  if (!pos) return { k: 1, pan: 0, ...base }
   const s = spatial(pos.x, pos.y ?? 0, pos.z)
   if (!s) return null
   return { ...base, pan: s.pan, k: s.g }
@@ -355,6 +357,178 @@ export const sfx = {
     modal({ t: t + 0.27, f: 2093, modes: [[1, 0.6, 1.2], [2.76, 0.25, 0.6], [5.4, 0.1, 0.3]], gain: 0.09, beat: 5, verb: 0.6 })
     tone({ t, type: 'sine', f: 220, f2: 880, glide: 0.3, d: 0.35, gain: 0.07 })
   },
+  // A Lucky Block charging up before it breaks; i = 0..3, each hit heavier and higher (a drum roll
+  // into a riser), with a sparkle that climbs the scale.
+  luckyCharge(i = 0) {
+    if (!voice(0.6)) return
+    const t = now()
+    tone({ t, type: 'sine', f: 70 + i * 18, f2: 45, d: 0.22, gain: 0.16 + i * 0.03, bus: A.ui })
+    modal({ t, f: vary(330 + i * 60, 0.03), modes: [[1, 0.5, 0.08], [2.4, 0.3, 0.05], [4.1, 0.15, 0.03]], gain: 0.1, strike: 0.08, bus: A.ui })
+    burst({ t, noise: 'pink', f: 600 + i * 400, f2: 2400 + i * 1200, q: 1.1, a: 0.08, d: 0.22, gain: 0.04 + i * 0.015, bus: A.ui })
+    for (let k = 0; k <= i; k++) tone({ t: t + 0.04 + k * 0.035, type: 'sine', f: note(784, i * 2 + k), d: 0.2, gain: 0.03, pan: rnd(-0.4, 0.4), verb: 0.45, bus: A.ui })
+  },
+  // The block cracking open: a brick crack, a deep boom, shattering sparkle; bigger for rarer prizes.
+  luckyBreak(rank = 0) {
+    if (!voice(2.5)) return
+    const t = now()
+    burst({ t, noise: 'white', f: 2600, q: 0.7, a: 0.001, d: 0.09, gain: 0.16, bus: A.ui })
+    modal({ t, f: vary(180, 0.05), modes: [[1, 0.6, 0.12], [2.7, 0.35, 0.08], [5.1, 0.2, 0.05]], gain: 0.18, strike: 0.1, bus: A.ui })
+    tone({ t: t + 0.01, type: 'sine', f: 110, f2: 38, d: 0.55, gain: 0.3, bus: A.ui })
+    burst({ t: t + 0.03, noise: 'white', hp: 4000, f: 9000, q: 0.4, d: 0.5 + rank * 0.25, gain: 0.05, verb: 0.5, bus: A.ui })
+    const n = 8 + rank * 4
+    for (let i = 0; i < n; i++) modal({ t: t + 0.05 + i * 0.028, f: note(1318, (i * 3) % 11), modes: [[1, 0.6, 0.3], [2.76, 0.2, 0.15]], gain: 0.025, pan: rnd(-0.6, 0.6), verb: 0.5, bus: A.ui })
+  },
+  // A jackpot (next-zone brainrots, rare variants): a brassy fanfare that lands on a shimmering chord.
+  jackpot() {
+    if (!voice(3)) return
+    const t = now()
+    const seq = [0, 4, 7, 12, 7, 12, 16]
+    seq.forEach((st, i) => {
+      tone({ t: t + i * 0.09, type: 'sawtooth', f: 392 * 2 ** (st / 12), d: 0.16, hold: 0.04, gain: 0.03, lp: 2600, verb: 0.3, bus: A.ui })
+      tone({ t: t + i * 0.09, type: 'triangle', f: 784 * 2 ** (st / 12), d: 0.18, gain: 0.025, verb: 0.3, bus: A.ui })
+    })
+    const end = t + seq.length * 0.09
+    for (const st of [0, 4, 7, 12, 16]) tone({ t: end, type: 'sawtooth', f: 392 * 2 ** (st / 12), a: 0.02, hold: 0.5, d: 1.2, gain: 0.022, lp: 3000, verb: 0.6, bus: A.ui })
+    modal({ t: end, f: 2093, modes: [[1, 0.6, 1.4], [2.76, 0.25, 0.7], [5.4, 0.1, 0.4]], gain: 0.08, beat: 6, verb: 0.6, bus: A.ui })
+    burst({ t: end, noise: 'white', hp: 6000, f: 10000, q: 0.4, d: 1.6, gain: 0.04, verb: 0.6, bus: A.ui })
+  },
+  // A free Lucky Block earned from Jump Crystals: a quick magic run up into a bell.
+  luckyFree() {
+    if (!voice(1.5)) return
+    const t = now()
+    for (let i = 0; i < 8; i++) tone({ t: t + i * 0.04, type: 'triangle', f: note(659, i), d: 0.22, gain: 0.04, pan: rnd(-0.4, 0.4), verb: 0.45, bus: A.ui })
+    modal({ t: t + 0.32, f: 1760, modes: [[1, 0.6, 1], [2.76, 0.25, 0.5], [5.4, 0.1, 0.3]], gain: 0.08, beat: 4, verb: 0.5, bus: A.ui })
+  },
+  // Fusion Machine: brainrots sucked in and the machine powering up (a rising electric whine,
+  // a vacuum whoosh and a heavy clunk), at the machine.
+  fuseStart(pos) {
+    const o = at(pos, { k: 1, pan: 0 })
+    if (!o || !voice(2)) return
+    const t = now()
+    const k = Math.min(1, o.k * 2 + 0.35)
+    burst({ t, noise: 'pink', f: 300, f2: 3600, q: 1.2, a: 0.3, d: 0.5, gain: 0.09 * k, pan: o.pan })
+    tone({ t: t + 0.1, type: 'sawtooth', f: 90, f2: 720, glide: 1.1, d: 1.3, hold: 0.6, gain: 0.035 * k, lp: 1800, pan: o.pan, verb: 0.3 })
+    tone({ t: t + 0.1, type: 'square', f: 180, f2: 1440, glide: 1.1, d: 1.2, gain: 0.012 * k, lp: 2600, pan: o.pan })
+    modal({ t: t + 0.85, f: 140, modes: [[1, 0.6, 0.2], [2.4, 0.4, 0.12], [4.6, 0.2, 0.08]], gain: 0.2 * k, strike: 0.1, pan: o.pan, verb: 0.3 })
+    for (let i = 0; i < 6; i++) burst({ t: t + 0.9 + i * 0.07, noise: 'white', hp: 3000, f: 6000, q: 2, a: 0.001, d: 0.03, gain: 0.04 * k, pan: o.pan + rnd(-0.3, 0.3) })
+  },
+  // A fusion finished (heard anywhere): a power-down chime and a triumphant ding-ding.
+  fuseDone() {
+    if (!voice(1.5)) return
+    const t = now()
+    tone({ t, type: 'sine', f: 880, f2: 440, d: 0.3, gain: 0.04, bus: A.ui })
+    ;[0, 7, 12, 16].forEach((st, i) => modal({ t: t + 0.12 + i * 0.09, f: 1046 * 2 ** (st / 12), modes: [[1, 0.6, 0.8], [2.76, 0.25, 0.4], [5.4, 0.1, 0.2]], gain: 0.05, beat: 3, verb: 0.5, bus: A.ui }))
+  },
+  // The fusion show: one swirl per orbit lap, climbing (i = 0..3).
+  fuseSwirl(i = 0) {
+    if (!voice(0.6)) return
+    const t = now()
+    burst({ t, noise: 'pink', f: 500 + i * 300, f2: 2600 + i * 900, q: 1.4, a: 0.12, d: 0.3, gain: 0.05 + i * 0.012, bus: A.ui })
+    tone({ t, type: 'sine', f: 220 * 2 ** (i / 4), f2: 440 * 2 ** (i / 4), d: 0.35, gain: 0.05, verb: 0.3, bus: A.ui })
+    for (let k = 0; k < 3; k++) tone({ t: t + k * 0.06, type: 'triangle', f: note(659, i * 2 + k), d: 0.18, gain: 0.025, pan: rnd(-0.5, 0.5), verb: 0.4, bus: A.ui })
+  },
+  // The three merging into one: a sucking implosion, then a bright boom with a shimmer.
+  fuseMerge(rank = 0) {
+    if (!voice(2.5)) return
+    const t = now()
+    tone({ t, type: 'sine', f: 1200, f2: 120, glide: 0.25, d: 0.28, gain: 0.06, bus: A.ui })
+    burst({ t, noise: 'white', f: 4000, f2: 400, q: 1, a: 0.2, d: 0.08, gain: 0.07, bus: A.ui })
+    tone({ t: t + 0.26, type: 'sine', f: 100, f2: 40, d: 0.6, gain: 0.3, bus: A.ui })
+    burst({ t: t + 0.26, noise: 'white', hp: 4000, f: 9000, q: 0.4, d: 0.7 + rank * 0.2, gain: 0.06, verb: 0.5, bus: A.ui })
+    for (let i = 0; i < 6 + rank * 2; i++) tone({ t: t + 0.3 + i * 0.035, type: 'sine', f: note(1046, i), d: 0.3, gain: 0.03, pan: rnd(-0.5, 0.5), verb: 0.5, bus: A.ui })
+  },
+  // Ascended Shop: buying a perk level. A regal brass chord that climbs with the level, a bell on
+  // top, and a shimmer; `max` (the last level) adds a final flourish.
+  ascendBuy(level = 1, max = false) {
+    if (!voice(1.6)) return
+    const t = now()
+    const root = 262 * 2 ** (Math.min(12, level - 1) / 12)
+    ;[0, 4, 7, 12].forEach((st, i) => {
+      tone({ t: t + i * 0.06, type: 'sawtooth', f: root * 2 ** (st / 12), a: 0.02, hold: 0.18, d: 0.6, gain: 0.022, lp: 2400, verb: 0.45, bus: A.ui })
+      tone({ t: t + i * 0.06, type: 'triangle', f: root * 2 * 2 ** (st / 12), d: 0.4, gain: 0.025, verb: 0.4, bus: A.ui })
+    })
+    modal({ t: t + 0.26, f: root * 4, modes: [[1, 0.6, 1], [2.76, 0.25, 0.5], [5.4, 0.1, 0.3]], gain: 0.07, beat: 4, verb: 0.55, bus: A.ui })
+    burst({ t: t + 0.26, noise: 'white', hp: 6000, f: 9000, q: 0.5, d: 0.8, gain: 0.03, verb: 0.5, bus: A.ui })
+    if (max) for (let i = 0; i < 10; i++) tone({ t: t + 0.5 + i * 0.04, type: 'sine', f: note(1046, i), d: 0.3, gain: 0.03, pan: rnd(-0.5, 0.5), verb: 0.5, bus: A.ui })
+  },
+  // The Ascended Shop unveiling: a rising "aah" pad (detuned saws through a soft filter), a boom,
+  // bells cascading down and a long shimmer.
+  ascendUnlock() {
+    if (!voice(4)) return
+    const t = now()
+    for (const st of [0, 7, 12, 16, 19]) {
+      tone({ t, type: 'sawtooth', f: 196 * 2 ** (st / 12), a: 0.6, hold: 0.8, d: 1.6, gain: 0.014, lp: 1600, verb: 0.7, bus: A.ui })
+      tone({ t, type: 'sawtooth', f: 196 * 2 ** (st / 12) * 1.004, a: 0.6, hold: 0.8, d: 1.6, gain: 0.012, lp: 1600, verb: 0.7, bus: A.ui })
+    }
+    tone({ t: t + 0.6, type: 'sine', f: 90, f2: 40, d: 0.8, gain: 0.3, bus: A.ui })
+    burst({ t: t + 0.6, noise: 'white', hp: 4000, f: 9000, q: 0.4, d: 2, gain: 0.05, verb: 0.7, bus: A.ui })
+    for (let i = 0; i < 9; i++) modal({ t: t + 0.65 + i * 0.09, f: note(2093, 9 - i), modes: [[1, 0.6, 0.8], [2.76, 0.25, 0.4]], gain: 0.04, pan: rnd(-0.6, 0.6), verb: 0.6, bus: A.ui })
+  },
+  // Base Level: a hammer on metal while a level builds (at the core).
+  hammer(pos) {
+    const o = at(pos)
+    if (!o || !voice(0.3, 0.5)) return
+    const k = Math.min(1, o.k * 2 + 0.2)
+    const t = now()
+    modal({ t, f: vary(1200, 0.08), modes: [[1, 0.6, 0.12], [2.7, 0.35, 0.08], [5.2, 0.2, 0.05]], gain: 0.06 * k, strike: 0.06, pan: o.pan })
+    burst({ t, noise: 'white', f: 5000, q: 1.5, a: 0.001, d: 0.03, gain: 0.04 * k, pan: o.pan })
+  },
+  // A Base Level finished: a rising brass fanfare, a deep boom and cascading bells.
+  baseUp(level = 1) {
+    if (!voice(3)) return
+    const t = now()
+    const root = 262 * 2 ** (Math.min(9, level) / 12)
+    ;[0, 4, 7, 12, 16].forEach((st, i) => {
+      tone({ t: t + i * 0.08, type: 'sawtooth', f: root * 2 ** (st / 12), a: 0.01, hold: 0.12, d: 0.4, gain: 0.024, lp: 2600, verb: 0.4, bus: A.ui })
+      tone({ t: t + i * 0.08, type: 'triangle', f: root * 2 * 2 ** (st / 12), d: 0.35, gain: 0.025, verb: 0.4, bus: A.ui })
+    })
+    for (const st of [0, 4, 7, 12]) tone({ t: t + 0.45, type: 'sawtooth', f: root * 2 ** (st / 12), a: 0.02, hold: 0.5, d: 1.2, gain: 0.02, lp: 2800, verb: 0.6, bus: A.ui })
+    tone({ t: t + 0.45, type: 'sine', f: 90, f2: 45, d: 0.6, gain: 0.28, bus: A.ui })
+    for (let i = 0; i < 8; i++) modal({ t: t + 0.5 + i * 0.07, f: note(1568, 8 - i), modes: [[1, 0.6, 0.6], [2.76, 0.25, 0.3]], gain: 0.035, pan: rnd(-0.6, 0.6), verb: 0.6, bus: A.ui })
+  },
+  // Hub events -------------------------------------------------------------------------------------
+  // A brainrot dropping out of the sky: a falling whistle.
+  rainFall(pos) {
+    const o = at(pos)
+    if (!o || !voice(0.9, 0.5)) return
+    const k = Math.min(1, o.k * 2 + 0.25)
+    tone({ t: now(), type: 'sine', f: vary(1900, 0.06), f2: 500, glide: 0.85, d: 0.9, hold: 0.5, gain: 0.03 * k, pan: o.pan })
+  },
+  // ...and landing: a soft thump, a pop and a sparkle (brighter for rare variants).
+  rainLand(pos, variant = 'normal') {
+    const o = at(pos)
+    if (!o || !voice(0.5)) return
+    const k = Math.min(1, o.k * 2 + 0.25)
+    const t = now()
+    tone({ t, type: 'sine', f: 120, f2: 55, d: 0.25, gain: 0.2 * k, pan: o.pan })
+    burst({ t, noise: 'brown', type: 'lowpass', f: 700, d: 0.15, gain: 0.12 * k, pan: o.pan })
+    bubble({ t: t + 0.03, f: 650, d: 0.06, gain: 0.08 * k, rise: 1.2, pan: o.pan })
+    const n = variant === 'normal' ? 3 : 7
+    for (let i = 0; i < n; i++) tone({ t: t + 0.05 + i * 0.04, type: 'sine', f: note(1046, i * 2), d: 0.2, gain: 0.025 * k, pan: o.pan, verb: 0.4 })
+  },
+  // An event starting: a snare roll into a bright brass "ta-daa!" and a bell.
+  eventStart() {
+    if (!voice(3)) return
+    const t = now()
+    for (let i = 0; i < 12; i++) burst({ t: t + i * 0.045, noise: 'white', type: 'bandpass', f: 2200, q: 0.8, a: 0.002, d: 0.06, gain: 0.025 + i * 0.006, bus: A.ui })
+    const hit = t + 0.58
+    ;[[0, 0.12], [7, 0.12], [12, 0.7]].forEach(([st, d], i) => {
+      for (const o of [0, 4, 7]) tone({ t: hit + i * 0.13, type: 'sawtooth', f: 392 * 2 ** ((st + o) / 12), a: 0.01, hold: d * 0.6, d, gain: 0.02, lp: 2800, verb: 0.4, bus: A.ui })
+    })
+    tone({ t: hit, type: 'sine', f: 98, f2: 60, d: 0.4, gain: 0.25, bus: A.ui })
+    modal({ t: hit + 0.26, f: 1568, modes: [[1, 0.6, 1.2], [2.76, 0.25, 0.6], [5.4, 0.1, 0.3]], gain: 0.07, beat: 5, verb: 0.6, bus: A.ui })
+  },
+  // An event ending: a gentle descending chime.
+  eventEnd() {
+    if (!voice(1.2)) return
+    const t = now()
+    for (let i = 0; i < 4; i++) modal({ t: t + i * 0.12, f: note(1318, 6 - i * 2), modes: [[1, 0.6, 0.6], [2.76, 0.25, 0.3]], gain: 0.04, verb: 0.5, bus: A.ui })
+  },
+  // The last seconds of an event: a tick, higher on the final one.
+  eventTick(last = false) {
+    if (!voice(0.2, 2)) return
+    tone({ t: now(), type: 'square', f: last ? 1320 : 880, d: 0.06, gain: 0.025, lp: 3000, bus: A.ui })
+  },
   // A page flip (Index tier jumps, tab switches).
   page() {
     if (!voice(0.3, 2)) return
@@ -377,6 +551,19 @@ export const sfx = {
       burst({ t, noise: 'white', f: 4000, q: 2, a: 0.001, d: 0.012, gain: 0.03, bus: A.ui })
     }
   },
+}
+// A sound is never worth breaking the game for: HUD buttons play `sfx.ui('click')` before running
+// their action and windows play `sfx.ui('open')` / `sfx.whoosh` while they build, so one throwing
+// recipe (bad parameter, suspended context) used to leave a button dead or a window empty.
+for (const name of Object.keys(sfx)) {
+  const fn = sfx[name]
+  sfx[name] = (...args) => {
+    try {
+      return fn.apply(sfx, args)
+    } catch (err) {
+      console.warn(`[audio] sfx.${name} failed`, err)
+    }
+  }
 }
 
 // --- Air rushing past while flying high and fast (a continuous filtered noise) ---------------------

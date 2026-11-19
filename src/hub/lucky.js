@@ -1,9 +1,12 @@
 // Lucky Blocks (north-west corner of the lane gap): a heap of "?" blocks, a
 // big rainbow block floating and spinning on top, fanned rainbow rays turning
 // behind it, rising sparkles and magic chimes. Walking up makes the heap
-// jiggle and pop a confetti burst.
+// jiggle and pop a confetti burst, and opens the Lucky Blocks window (ui/panels.js).
+// The heap spins faster and sparkles while you own unopened blocks, and erupts
+// (fireworks for rare prizes) when you collect a prize.
 import { AdditiveBlending, BoxGeometry, Color, DoubleSide, Group, Mesh, MeshBasicMaterial, MeshStandardMaterial, PlaneGeometry, PointLight } from 'three'
 import { HUB } from '../config.js'
+import { bus, luckyOwned } from '../game/state.js'
 import { mulberry32 } from '../textures.js'
 import { solid } from './kit.js'
 import { outlined, paintedTexture, paintStuds } from './paint.js'
@@ -94,6 +97,10 @@ export function buildLucky(ctx) {
   ctx.addEmitter('chimes', x, 3, z, 0.7)
 
   let jiggle = 0
+  let hype = 0 // 0..~2 after a prize is collected: faster spin, brighter light, bigger rays
+  let spin = 0
+  let rayTurn = 0
+  let sparkleIn = 0
   ctx.zone({
     x0: x - 6.5,
     x1: x + 6.5,
@@ -106,16 +113,52 @@ export function buildLucky(ctx) {
       ctx.sfx.magic({ x, z })
       ctx.fx.burst(x, 4.5, z, { count: 40, colors: rayColors, speed: [4, 9], up: 4, gravity: 12, life: [0.8, 1.5], size: [0.25, 0.45], drag: 1.2 })
       ctx.fx.ring(x, 0.1, z, { color: '#ffd84a', r0: 1, r1: 6, life: 0.7 })
+      bus.emit('window', 'lucky')
     },
+  })
+
+  // A prize collected from a block (ui/rewards.js): the heap erupts, more for rarer prizes.
+  bus.on('luckyCollect', ({ rank = 0 }) => {
+    jiggle = 1.6
+    hype = Math.min(2.5, hype + 1 + rank * 0.35)
+    const y = top.position.y
+    ctx.fx.burst(x, y, z, { sprite: 'sparkle', count: 50 + rank * 25, colors: rayColors, speed: [5, 11 + rank * 2], up: 3, gravity: 9, life: [0.9, 1.7], size: [0.35, 0.7], drag: 1 })
+    ctx.fx.burst(x, y, z, { count: 30 + rank * 12, colors: ['#ffffff', '#ffe83a', '#ff4de0'], speed: [2, 5], life: [0.5, 0.9], size: [0.6, 1], drag: 3, grow: 1.8 })
+    ctx.fx.ring(x, 0.12, z, { color: '#ffd84a', r0: 1, r1: 8 + rank * 2, life: 0.8 })
+    ctx.fx.ring(x, 0.12, z, { color: '#ff4de0', r0: 0.5, r1: 5 + rank, life: 0.6 })
+    // Rarer prizes: fireworks popping over the heap.
+    for (let k = 0; k < rank; k++) {
+      setTimeout(() => {
+        const fx = x + (Math.random() - 0.5) * 8
+        const fz = z + (Math.random() - 0.5) * 6
+        const fy = 9 + Math.random() * 5
+        ctx.fx.burst(fx, fy, fz, { sprite: 'sparkle', count: 45, colors: [rayColors[(k * 3) % rayColors.length], '#ffffff', rayColors[(k * 3 + 2) % rayColors.length]], speed: [5, 9], gravity: 5, life: [0.8, 1.4], size: [0.35, 0.6], drag: 1.4 })
+        ctx.sfx.pop({ x: fx, y: fy, z: fz }, 500 + k * 120)
+      }, 250 + k * 260)
+    }
   })
 
   ctx.onUpdate((t, dt) => {
     jiggle = Math.max(0, jiggle - dt * 1.3)
-    top.position.set(0, 4.4 + Math.sin(t * 1.7) * 0.3, 0)
-    top.rotation.set(Math.sin(t * 0.7) * 0.3, t * 0.9, Math.cos(t * 0.6) * 0.25)
-    rays.rotation.z = t * 0.25
+    hype = Math.max(0, hype - dt * 0.45)
+    // Unopened blocks waiting: the heap calls you over (faster spin, pulsing light, sparkles).
+    const waiting = luckyOwned() > 0 ? 1 : 0
+    spin += dt * (0.9 + waiting * 1.2 + hype * 4)
+    rayTurn += dt * (0.25 + waiting * 0.35 + hype * 1.5)
+    top.position.set(0, 4.4 + Math.sin(t * 1.7) * 0.3 + hype * 0.5, 0)
+    top.rotation.set(Math.sin(t * 0.7) * 0.3, spin, Math.cos(t * 0.6) * 0.25)
+    top.scale.setScalar(1.7 * (1 + hype * 0.12 + waiting * Math.max(0, Math.sin(t * 4)) * 0.06))
+    rays.rotation.z = rayTurn
     rays.position.y = top.position.y + 0.2
-    light.intensity = 22 + Math.sin(t * 3) * 6
+    rays.scale.setScalar(1 + hype * 0.35 + waiting * 0.1)
+    light.intensity = 22 + Math.sin(t * 3) * 6 + waiting * (8 + Math.sin(t * 6) * 8) + hype * 30
+    if (waiting) {
+      sparkleIn -= dt
+      if (sparkleIn <= 0) {
+        sparkleIn = 1.3
+        ctx.fx.burst(x, top.position.y, z, { sprite: 'sparkle', count: 12, colors: rayColors, speed: [2, 4], up: 1.5, gravity: 3, life: [0.6, 1.1], size: [0.3, 0.5], drag: 1 })
+      }
+    }
     for (const b of blocks) {
       const k = jiggle * Math.sin(t * 22 + b.phase)
       b.m.position.y = b.base.y + Math.abs(k) * 0.35

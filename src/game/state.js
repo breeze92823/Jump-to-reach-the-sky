@@ -3,7 +3,7 @@
 // of brainrots found. Everything is saved (autosave + on leave) to localStorage and, for a
 // signed-in player, the game server (net.js), and restored with the money the base earned while away.
 // Prices are money only (no premium currency anywhere in the game).
-import { CREATURES, DAILY, ECONOMY, INDEX_BONUS, ITEMS, JUMP, LANE, REBIRTH, SAVE, STORE, TRAINING, UPGRADES, VARIANTS, ZONES, jumpHeight } from '../config.js'
+import { ASCENDED, BASE_LEVELS, CREATURES, DAILY, ECONOMY, INDEX_BONUS, ITEMS, JUMP, LANE, LUCKY_BLOCKS, REBIRTH, SAVE, STORE, TRAINING, UPGRADES, VARIANTS, ZONES, jumpHeight } from '../config.js'
 
 export const game = {
   money: ECONOMY.startMoney,
@@ -29,6 +29,12 @@ export const game = {
   luckyJumps: false, // Lucky Jumps unlocked
   items: { box: true }, // owned back items
   equipped: 'box',
+  luckyBlocks: { lucky: 0, super: 0, rainbow: 0 }, // unopened Lucky Blocks by tier
+  crystals: 0, // Jump Crystals picked up (every LUCKY_BLOCKS.freeEvery gives a free block)
+  fusion: null, // Fusion Machine job { species, from, to, at (ms it is done), ms (its length) } | null
+  ascended: {}, // Ascended Shop perk id -> level bought (0 / missing = none)
+  baseLevel: 0, // Base Level built (opens the lane walls up to ZONES[baseLevel])
+  baseBuild: null, // the level being built { level, at (ms done), ms } | null
   // Session only (not saved):
   zone: 0, // zone the player is standing in
   level: -1, // lane terrace index under the player (-1 = in the hub)
@@ -93,6 +99,65 @@ export function totalIncome() {
   return sum
 }
 
+// --- Base Level (config BASE_LEVELS; the core in front of your base runs the show) -------------------
+export const BASE_MAX = BASE_LEVELS.levels.length
+// The wall into zone i is open once Base Level i is built.
+export const wallOpen = (i) => i <= game.baseLevel
+// The next level's { level, cost, minutes }, or null at the top.
+export function nextBaseLevel() {
+  const l = BASE_LEVELS.levels[game.baseLevel]
+  return l ? { level: game.baseLevel + 1, ...l } : null
+}
+// The build in progress: { level, left (s), progress 0..1, done } or null.
+export function baseBuildState(now = Date.now()) {
+  const b = game.baseBuild
+  if (!b) return null
+  const left = Math.max(0, (b.at - now) / 1000)
+  return { level: b.level, left, progress: b.ms > 0 ? Math.min(1, 1 - (left * 1000) / b.ms) : 1, done: left <= 0 }
+}
+// Pay and start building the next level; false if busy, maxed or too poor.
+export function startBaseBuild() {
+  const n = nextBaseLevel()
+  if (!n || game.baseBuild || !spend(n.cost)) return false
+  const ms = n.minutes * 60_000
+  game.baseBuild = { level: n.level, at: Date.now() + ms, ms }
+  save(true)
+  return true
+}
+// A finished build becomes the Base Level (the core calls this when the timer is up).
+export function finishBaseBuild() {
+  const b = baseBuildState()
+  if (!b || !b.done) return 0
+  game.baseLevel = b.level
+  game.baseBuild = null
+  save(true)
+  return game.baseLevel
+}
+
+// --- Hub event effects (hub/events.js sets these while an event runs, config EVENTS) -----------------
+export const eventFx = { luck: 1, crystalGain: 1, crystalRespawn: 1, fuseFee: 1, fuseTime: 1, luckyPrice: 1 }
+
+// --- Ascended Shop perks (config ASCENDED) ---------------------------------------------------
+export const ascendedUnlocked = () => game.rebirths >= ASCENDED.unlock.rebirths
+export const ascPerk = (id) => ASCENDED.perks.find((p) => p.id === id)
+export const ascLevel = (id) => game.ascended[id] || 0
+// Price of the next level, or null when maxed.
+export function ascPrice(id) {
+  const p = ascPerk(id)
+  const lv = ascLevel(id)
+  return lv >= p.max ? null : Math.round(p.base * p.growth ** lv)
+}
+// Buys the next level (unlocked, affordable, not maxed); returns the new level or 0.
+export function buyAscended(id) {
+  const price = ascPrice(id)
+  if (!ascendedUnlocked() || price === null || !spend(price)) return 0
+  game.ascended[id] = ascLevel(id) + 1
+  save()
+  return game.ascended[id]
+}
+// The effect of `levels` of a perk (default: what you own), for the effect lines.
+export const ascEffect = (id, levels = ascLevel(id)) => levels * (ascPerk(id).per ?? 1)
+
 // --- Multipliers ---------------------------------------------------------------------------
 const boostOn = (id) => (game.boosts[id] ?? 0) > 0
 // Rebirth n's multipliers (past the table they keep growing).
@@ -109,7 +174,7 @@ export function indexFound() {
 }
 export const indexBonus = () => Math.floor(indexFound() / INDEX_BONUS.every) * INDEX_BONUS.pct
 export function moneyMult() {
-  let m = rebirthMults().money * (1 + indexBonus())
+  let m = rebirthMults().money * (1 + indexBonus()) * (1 + game.baseLevel * BASE_LEVELS.income)
   if (game.perks.vip) m *= STORE.vip.money
   if (boostOn('money2')) m *= STORE.boosts.money2.money
   return m
@@ -120,9 +185,9 @@ export function trainMult() {
   if (game.perks.vip) m *= STORE.vip.jump
   if (boostOn('train2')) m *= STORE.boosts.train2.jump
   if (boostOn('jump30')) m *= STORE.boosts.jump30.jump
-  return m
+  return m * (1 + ascEffect('mastery'))
 }
-export const luckMult = () => (boostOn('lucky') ? STORE.boosts.lucky.luck : 1)
+export const luckMult = () => (boostOn('lucky') ? STORE.boosts.lucky.luck : 1) * (1 + ascEffect('golden')) * eventFx.luck
 
 // Every jump / training hop: base + the equipped item's bonus, times the
 // multipliers; Lucky Jumps sometimes multiply it (the HUD celebrates via the bus).
@@ -187,6 +252,7 @@ export function doRebirth(skip = false) {
   } else {
     if (game.jumpPower < rebirthReq()) return false
     game.jumpPower = 0
+    game.money = 0
   }
   game.rebirths++
   save(true)
@@ -218,6 +284,22 @@ export function discover(species, variant) {
 export function nextZoneReq(from = game.bestZone) {
   return ZONES[Math.min(ZONES.length - 1, from + 1)].req
 }
+// --- Lucky Blocks ------------------------------------------------------------------------------
+// Price: seconds of your base income (a 2x Money boost does not raise it), at least the tier's min.
+export function luckyPrice(tier) {
+  const t = LUCKY_BLOCKS.tiers[tier]
+  const income = totalIncome() / ((game.boosts.money2 ?? 0) > 0 ? STORE.boosts.money2.money : 1)
+  return Math.round(Math.max(t.min, income * t.seconds) * eventFx.luckyPrice)
+}
+export const luckyOwned = () => Object.values(game.luckyBlocks).reduce((a, n) => a + (n || 0), 0)
+// A Jump Crystal was picked up: true when it completed a free Lucky Block.
+export function countCrystal() {
+  game.crystals++
+  if (game.crystals % LUCKY_BLOCKS.freeEvery) return false
+  game.luckyBlocks.lucky = (game.luckyBlocks.lucky || 0) + 1
+  return true
+}
+
 export const crystalGain = (zoneIndex) => Math.max(3, Math.round(ZONES[Math.min(ZONES.length - 1, zoneIndex + 1)].req * LANE.crystalGain))
 
 // --- Boost clock --------------------------------------------------------------------------------
@@ -235,7 +317,7 @@ export function tickBoosts(dt) {
 // The save lives in localStorage (guests, offline, a cache) and, for a signed-in player, on the game
 // server too (net.js: the server's copy is loaded at boot and wins). `saveHooks` are how net.js sees
 // every save; `owner` tags the local copy with the account it belongs to.
-const SAVED = ['money', 'totalEarned', 'jumpPower', 'rebirths', 'slotsUnlocked', 'slots', 'pads', 'skips', 'bestZone', 'index', 'perks', 'boosts', 'smartJump', 'dailyAt', 'dailyDay', 'dailyPass', 'dailyMilestones', 'carried', 'speed', 'carryMax', 'luckyJumps', 'items', 'equipped']
+const SAVED = ['money', 'totalEarned', 'jumpPower', 'rebirths', 'slotsUnlocked', 'slots', 'pads', 'skips', 'bestZone', 'index', 'perks', 'boosts', 'smartJump', 'dailyAt', 'dailyDay', 'dailyPass', 'dailyMilestones', 'carried', 'speed', 'carryMax', 'luckyJumps', 'items', 'equipped', 'luckyBlocks', 'crystals', 'fusion', 'ascended', 'baseLevel', 'baseBuild']
 const pick = () => {
   const out = {}
   for (const k of SAVED) out[k] = game[k]
@@ -303,9 +385,24 @@ export function load(serverDoc = null, now = Date.now(), uid = '') {
   game.carried = game.carried.filter((c) => c && CREATURES[c.species] && VARIANTS[c.variant]).slice(0, game.carryMax)
   if (!ITEMS.some((i) => i.id === game.equipped && game.items[i.id])) game.equipped = 'box'
   game.items.box = true
+  for (const t in LUCKY_BLOCKS.tiers) game.luckyBlocks[t] = Math.max(0, Math.floor(Number(game.luckyBlocks[t]) || 0))
+  for (const t in game.luckyBlocks) if (!LUCKY_BLOCKS.tiers[t]) delete game.luckyBlocks[t]
+  game.crystals = Math.max(0, Math.floor(Number(game.crystals) || 0))
+  // Base Level: saves from before it existed keep every wall they had already passed open.
+  if (data.baseLevel === undefined) game.baseLevel = game.bestZone
+  game.baseLevel = Math.max(0, Math.min(BASE_LEVELS.levels.length, Math.floor(Number(game.baseLevel) || 0)))
+  const bb = game.baseBuild
+  if (!bb || bb.level !== game.baseLevel + 1 || !Number.isFinite(bb.at) || !Number.isFinite(bb.ms)) game.baseBuild = null
+  for (const id in game.ascended) {
+    const p = ASCENDED.perks.find((q) => q.id === id)
+    if (!p) delete game.ascended[id]
+    else game.ascended[id] = Math.max(0, Math.min(p.max, Math.floor(Number(game.ascended[id]) || 0)))
+  }
+  const f = game.fusion
+  if (!f || !CREATURES[f.species] || !VARIANTS[f.from] || !VARIANTS[f.to] || !Number.isFinite(f.at) || !Number.isFinite(f.ms)) game.fusion = null
   game.pads = game.pads.map((v, i) => v || TRAINING.pads[i].price === 0)
   // Offline income, banked onto each slot's collect pad.
-  const away = Math.min(ECONOMY.offlineCap, Math.max(0, (now - (data.t ?? now)) / 1000))
+  const away = Math.min(ECONOMY.offlineCap + ascEffect('vault') * 3600, Math.max(0, (now - (data.t ?? now)) / 1000))
   let earned = 0
   if (away > 30) {
     for (let i = 0; i < game.slots.length; i++) {

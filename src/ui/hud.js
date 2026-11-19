@@ -14,6 +14,7 @@ import { Vector3 } from 'three'
 import { ADS, INDEX_BONUS, STORE, TELEPORTS, ZONES } from '../config.js'
 import { addBoost, bus, canAfford, creatureInfo, game, incomeOf, indexBonus, indexFound, spend, totalIncome } from '../game/state.js'
 import { LEVELS, laneProgress } from '../game/levels.js'
+import { clockText, currentEvent, nextEvent } from '../game/events.js'
 import { player } from '../player.js'
 import { onKey } from '../input.js'
 import { sfx } from '../audio/hub.js'
@@ -72,6 +73,34 @@ export function createHud({ renderer, camera, hub, teleport }) {
   }
   nav.append(btn('nav-btn training', 'Training', () => go('training')), btn('nav-btn home', 'Home', () => go('home')), btn('nav-btn shops', 'Shops', () => go('shops')))
   root.append(nav)
+
+  // --- Event chip (hub events, game/events.js): the running event and its countdown, or the next one.
+  // Tap it for what the event does.
+  const eventChip = btn('hud-event', '<i class="ev-dot"></i><span class="ev-t ol"></span><span class="ev-c ol"></span>', () => {
+    const ev = currentEvent()
+    const def = ev?.def ?? nextEvent().def
+    toast(ev ? `${def.name}: ${def.text}` : `Next event: ${def.name}. ${def.text}`, 'info')
+  })
+  const evT = eventChip.querySelector('.ev-t')
+  const evC = eventChip.querySelector('.ev-c')
+  let evKey = ''
+  function updateEventChip() {
+    const ev = currentEvent()
+    const def = ev?.def ?? nextEvent().def
+    const live = !!ev
+    const title = live ? def.name : `Next: ${def.name}`
+    const count = live ? clockText(ev.left) : clockText(nextEvent().in)
+    const key = `${live}|${title}`
+    if (key !== evKey) {
+      evKey = key
+      evT.textContent = title
+      eventChip.classList.toggle('live', live)
+      eventChip.style.setProperty('--ec', def.color)
+    }
+    if (evC.textContent !== count) evC.textContent = count
+    eventChip.classList.toggle('ending', live && ev.left <= 10)
+  }
+  root.append(eventChip)
 
   // --- Left tiles -----------------------------------------------------------------------------
   const left = h('div', 'hud-left')
@@ -204,6 +233,12 @@ export function createHud({ renderer, camera, hub, teleport }) {
   }
   bus.on('toast', ({ text, kind }) => toast(text, kind))
   bus.on('banner', showBanner)
+  // Ascended Auto Collect: the base's money pops onto the counter every few seconds.
+  bus.on('autoCollect', (amount) => {
+    juice.floatText(mRow, `+$${short(amount)} auto`, '#7dff4a', 0.8)
+    juice.bump(mRow, 1.08)
+    sfx.coin(2)
+  })
 
   // --- Windows ----------------------------------------------------------------------------------------------------
   // The frame from the reference screens: a coloured title bar (icon, outlined
@@ -236,7 +271,15 @@ export function createHud({ renderer, camera, hub, teleport }) {
     }
     win = { body, el: w, main, foot, count: cnt, refresh: null }
     const api = win
-    build(body, api)
+    try {
+      build(body, api)
+    } catch (err) {
+      // A window that fails to build must not leave an empty frame over the game.
+      console.error(`[hud] window "${title}" failed to build`, err)
+      closeWindow()
+      toast('That window could not open. Try again.', 'error')
+      return
+    }
     if (win !== api) return
     win.refresh = refresh ?? api.refresh ?? null
     win.refresh?.(body)
@@ -438,7 +481,7 @@ export function createHud({ renderer, camera, hub, teleport }) {
   const rewards = createRewards({ hub, thumb, toast, moneyEl: mRow, jumpEl: jRow })
   const panels = createPanels({ openWindow, closeWindow, btn, thumb, toast, hub, go, showBanner, moneyEl: mRow, jumpEl: jRow, rewards })
   const { openIndex, openRebirth, openPlaytime, openDaily } = panels
-  const WINDOWS = { upgrades: panels.openUpgrades, items: panels.openItems, sell: panels.openSell, index: openIndex, rebirth: openRebirth, playtime: openPlaytime, daily: openDaily }
+  const WINDOWS = { upgrades: panels.openUpgrades, items: panels.openItems, sell: panels.openSell, index: openIndex, rebirth: openRebirth, playtime: openPlaytime, daily: openDaily, lucky: panels.openLucky, fusion: panels.openFusion, ascended: panels.openAscended, base: panels.openBase }
   bus.on('window', (id) => WINDOWS[id]?.())
 
   // Lucky Jump: a big pop of text, confetti and a magic chime.
@@ -524,8 +567,12 @@ export function createHud({ renderer, camera, hub, teleport }) {
       left.style.left = `${rx}px`
       rowBottom = top + t
     }
-    root.style.setProperty('--toast-top', `${Math.max(navBottom, rowBottom) + 8}px`)
     root.style.setProperty('--stats-top', `${Math.max(navBottom, rowBottom) + 6}px`)
+    // Event chip: under the nav (under the stats on touch, where they sit below the nav); toasts below it.
+    const evTop = touch ? Math.max(navBottom, rowBottom) + 6 + (stats.offsetHeight || 40) + 4 : Math.max(navBottom, rowBottom) + 6
+    root.style.setProperty('--event-top', `${evTop}px`)
+    eventChip.style.left = nav.style.left
+    root.style.setProperty('--toast-top', `${evTop + (eventChip.offsetHeight || 30) + 8}px`)
     // Right side: offers + zone bar below the nav (and the touch buttons), above the touch cluster.
     const top = Math.max(navTop + 20, touch ? pad + 60 : 0, H * 0.12)
     const bottom = touch ? clamp(Math.min(W, H) * 0.2 + 120, 150, 240) : H * 0.14
@@ -594,6 +641,7 @@ export function createHud({ renderer, camera, hub, teleport }) {
       slow -= dt
       if (slow > 0) return
       slow = 0.2
+      updateEventChip()
       const rate = `+${money(totalIncome())}/s`
       if (rate !== shown.rate) mRate.textContent = shown.rate = rate
       // Carry chip.

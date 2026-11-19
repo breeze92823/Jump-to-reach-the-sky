@@ -8,13 +8,13 @@
 // bought (money only). The top terrace ends at a golden sky gate.
 // Per frame: which terrace you are on, Smart Jump and your jump speed, and the
 // "new zone" celebration the first time you land on a terrace.
-import { BoxGeometry, ConeGeometry, CylinderGeometry, Group, IcosahedronGeometry, Mesh, MeshBasicMaterial, MeshStandardMaterial, PlaneGeometry, TorusGeometry } from 'three'
+import { AdditiveBlending, BoxGeometry, CanvasTexture, Color, ConeGeometry, CylinderGeometry, DoubleSide, Group, IcosahedronGeometry, Mesh, MeshBasicMaterial, MeshStandardMaterial, PlaneGeometry, RepeatWrapping, TorusGeometry } from 'three'
 import { HUB, LANE, PHYSICS } from '../config.js'
 import { bake } from '../bake.js'
 import { mulberry32 } from '../textures.js'
 import { launch, player } from '../player.js'
 import { LEVELS, LANE_END, TOP_Y, levelAt, smartCap } from '../game/levels.js'
-import { bus, game, skipPrice, spend, jumpHeight } from '../game/state.js'
+import { bus, game, skipPrice, spend, jumpHeight, wallOpen } from '../game/state.js'
 import { lego, solid, wbox } from './kit.js'
 import { decalTexture, outlined, paintedTexture, paintJumper, short } from './paint.js'
 import { signPanel } from './signs.js'
@@ -167,6 +167,8 @@ export function buildLane(ctx) {
 
   // --- Skip Wall trampolines (one each side of every wall) ------------------------------------
   const pads = buildSkipPads(ctx, root)
+  // --- Base Level gates: a force field over every wall your base has not opened yet ------------
+  const gates = buildGates(ctx)
 
   // Bake the static terrain to a few draw calls; decals and pads stay live.
   const baked = bake(root, true)
@@ -207,7 +209,100 @@ export function buildLane(ctx) {
       for (const r of risers) r.r.set(game.jumpPower >= r.req)
     }
     pads.update(t, dt)
+    gates.update(t, dt)
   })
+}
+
+// A shimmering purple force field over the top of wall i (from its edge up into the sky) with a
+// collider, until Base Level i is built (state.js wallOpen). Bumping into it buzzes and says what to
+// do; when the level is built the field shatters in a burst of sparks (quietly if it was already
+// open at load).
+function buildGates(ctx) {
+  const L = HUB.laneHalf
+  const H = 46
+  const gates = []
+  for (const lv of LEVELS) {
+    if (lv.i === 0) continue
+    // The field's face sits just in front of the wall's top edge; its collider runs 1.2 m deep over
+    // the edge, so you cannot perch on the edge in front of it either.
+    const z = lv.south + 0.2
+    const mat = new MeshBasicMaterial({ color: new Color('#c47aff').multiplyScalar(1.6), map: fieldTex(), transparent: true, opacity: 0.55, blending: AdditiveBlending, depthWrite: false, side: DoubleSide })
+    const field = new Mesh(new PlaneGeometry(2 * L, H), mat)
+    field.position.set(0, lv.y - 0.5 + H / 2, z)
+    field.userData.dynamic = true
+    const edge = new Mesh(new BoxGeometry(2 * L, 0.18, 0.18), new MeshBasicMaterial({ color: new Color('#e2b8ff').multiplyScalar(2.4) }))
+    edge.position.set(0, lv.y + 0.05, z)
+    const tag = ctx.label(`Base Lv ${lv.i} needed`, 2.2, { colors: ['#e2b8ff', '#ffffff'], outline: '#2a0a4a', outlineWidth: 16 }, { near: 40, far: 110 })
+    tag.position.set(0, lv.y + 3.2, z + 0.6)
+    const collider = solid(L, H / 2, 0.6, 0, lv.y - 0.5 + H / 2, z - 0.6)
+    const g = { i: lv.i, lv, z, field, edge, tag, collider, open: false, bumpIn: 0 }
+    ctx.scene.add(field, edge, tag)
+    gates.push(g)
+  }
+  let first = true
+  const open = (g, quiet) => {
+    g.open = true
+    g.collider.setEnabled(false)
+    g.field.removeFromParent()
+    g.edge.removeFromParent()
+    g.tag.removeFromParent()
+    if (quiet) return
+    const { lv, z } = g
+    for (let k = 0; k < 7; k++) ctx.fx.burst((k / 6 - 0.5) * 2 * L, lv.y + 1 + Math.random() * 6, z, { sprite: 'sparkle', count: 18, colors: ['#e2b8ff', '#c47aff', '#ffffff'], speed: [3, 8], gravity: 6, life: [0.6, 1.2], size: [0.35, 0.6], drag: 1 })
+    ctx.fx.ring(0, lv.y + 0.1, z - 2, { color: '#c47aff', r0: 1, r1: 14, life: 0.9 })
+    ctx.sfx.unlock({ x: 0, y: lv.y, z })
+  }
+  return {
+    update(t, dt) {
+      const p = player.position
+      for (const g of gates) {
+        if (g.open) continue
+        if (wallOpen(g.i)) {
+          open(g, first)
+          continue
+        }
+        g.field.material.map.offset.x = (t * 0.25) % 1
+        g.field.material.opacity = 0.45 + Math.sin(t * 3 + g.i) * 0.12
+        g.tag.position.y = g.lv.y + 3.2 + Math.sin(t * 1.6 + g.i) * 0.15
+        // Bumping into it: a buzz, sparks where you hit and what to do (at most every 3 s).
+        g.bumpIn -= dt
+        if (g.bumpIn <= 0 && Math.abs(p.z - g.z) < 1.3 && p.y > g.lv.y - g.lv.rise + 1 && p.y < g.lv.y + 30) {
+          g.bumpIn = 3
+          ctx.sfx.locked({ x: p.x, y: p.y, z: p.z })
+          ctx.fx.burst(p.x, p.y + 1, g.z, { sprite: 'sparkle', count: 20, colors: ['#e2b8ff', '#c47aff', '#ffffff'], speed: [2, 5], life: [0.3, 0.6], size: [0.3, 0.5], drag: 2 })
+          ctx.fx.floatText(`Base Lv ${g.i} needed!`, p.x, p.y + 3, p.z, { color: '#e2b8ff', stroke: '#2a0a4a', size: 0.9, wobble: 0.12 })
+          bus.emit('toast', { text: `Upgrade your base to Level ${g.i} to open the ${g.lv.zone.name} zone (the core in front of your base).`, kind: 'info' })
+        }
+      }
+      first = false
+    },
+  }
+}
+// Diagonal energy stripes for the force field (repeating, scrolled each frame).
+let fieldTexture = null
+function fieldTex() {
+  if (fieldTexture) return fieldTexture
+  const c = document.createElement('canvas')
+  c.width = c.height = 128
+  const g = c.getContext('2d')
+  const grad = g.createLinearGradient(0, 0, 0, 128)
+  grad.addColorStop(0, 'rgba(255,255,255,0.05)')
+  grad.addColorStop(1, 'rgba(255,255,255,0.35)')
+  g.fillStyle = grad
+  g.fillRect(0, 0, 128, 128)
+  g.fillStyle = 'rgba(255,255,255,0.75)'
+  for (let k = -128; k < 256; k += 32) {
+    g.beginPath()
+    g.moveTo(k, 0)
+    g.lineTo(k + 10, 0)
+    g.lineTo(k + 10 + 128, 128)
+    g.lineTo(k + 128, 128)
+    g.fill()
+  }
+  fieldTexture = new CanvasTexture(c)
+  fieldTexture.wrapS = fieldTexture.wrapT = RepeatWrapping
+  fieldTexture.repeat.set(6, 8)
+  return fieldTexture
 }
 
 // Orange trampolines in front of each wall: a bought skip launches you onto the
@@ -256,6 +351,11 @@ function buildSkipPads(ctx, root) {
         y0: y - 0.5,
         y1: y + 2.5,
         onEnter() {
+          if (!wallOpen(i)) {
+            ctx.sfx.locked({ x, y, z })
+            bus.emit('toast', { text: `Base Lv ${i} needed before this wall can be skipped. Upgrade the core in front of your base.`, kind: 'info' })
+            return
+          }
           if (game.skips[i]) fire(ctx, pad)
           else {
             const price = skipPrice(i)
