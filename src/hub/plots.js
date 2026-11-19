@@ -22,7 +22,8 @@ import { makeAura } from './aura.js'
 import { makeTag, tagLines } from './brainrots.js'
 import { pine, roundTree } from './arena.js'
 import { mulberry32 } from '../textures.js'
-import { addBoost, baseIncome, bus, earn, game, incomeOf, moneyMult, offerPrompt, slotPrice, spend } from '../game/state.js'
+import { buildBaseCore } from './baseCore.js'
+import { addBoost, ascLevel, baseIncome, bus, earn, game, incomeOf, moneyMult, offerPrompt, slotPrice, spend } from '../game/state.js'
 
 const box = new BoxGeometry(1, 1, 1)
 const cyl = new CylinderGeometry(1, 1, 1, 16)
@@ -294,6 +295,20 @@ function localBase(ctx, cx) {
     ctx.carry.pick(data, hide(slot))
     ctx.sfx.pickup({ x: slot.wx, y: slot.top, z: slot.z })
   }
+  // The Fusion Machine takes a brainrot off pedestal i (its bank is collected first): the
+  // pedestal empties and the creature is handed over, still standing where it was.
+  ctx.baseCanTake = (i) => !!(slots[i] && game.slots[i] && slots[i].view && !slots[i].flying)
+  ctx.takeFromBase = (i) => {
+    const slot = slots[i]
+    if (!ctx.baseCanTake(i)) return null
+    collect(slot)
+    game.slots[i] = null
+    slot.tag.s.visible = false
+    const v = slot.view
+    hide(slot)
+    ctx.fx.burst(slot.wx, slot.top + 0.6, slot.z, { sprite: 'sparkle', count: 18, colors: ['#c79aff', '#ffffff', '#7ff0ff'], speed: [2, 5], life: [0.4, 0.8], size: [0.3, 0.55], gravity: 2 })
+    return v.c
+  }
   const swapAt = (slot) => {
     if (!game.slots[slot.i] || !slot.view || !ctx.carry.has()) return
     collect(slot)
@@ -418,6 +433,8 @@ function localBase(ctx, cx) {
     }
   })
 
+  // The Base Upgrade core (Base Level), in front of the base beside the path.
+  buildBaseCore(ctx, cx - 4.5, z0 - 5)
   // "You" floating over the base, gently bobbing.
   const you = ctx.label('You', 2.6, { color: '#3dff4a', outline: '#0c2a10', outlineWidth: 18 })
   you.position.set(0, 9.5, z0 + 6)
@@ -425,13 +442,22 @@ function localBase(ctx, cx) {
 
   // Money builds up on every filled pad all the time; tags and the boards catch up a few times a second.
   let acc = 0
+  let autoAcc = 0 // Auto Collect money not shown yet
+  let autoIn = 3
   ctx.onUpdate((t, dt) => {
     acc += dt
     const mult = moneyMult()
     const pp = ctx.player.position
+    const auto = ascLevel('autoCollect') > 0
     for (const s of slots) {
       const data = game.slots[s.i]
       if (data && s.i < game.slotsUnlocked) data.bank += baseIncome(data) * mult * dt
+      // Ascended Auto Collect: the bank goes straight to you (the HUD shows it every few seconds).
+      if (auto && data && data.bank > 0) {
+        autoAcc += data.bank
+        earn(data.bank)
+        data.bank = 0
+      }
       if (s.flash) {
         s.flash = Math.max(0, s.flash - dt * 2)
         s.pad.scale.y = 0.14 * (1 - s.flash * 0.6)
@@ -445,6 +471,12 @@ function localBase(ctx, cx) {
     }
     pulsePads(t)
     you.position.y = 9.5 + Math.sin(t * 1.4) * 0.25
+    autoIn -= dt
+    if (autoIn <= 0) {
+      autoIn = 3
+      if (autoAcc >= 1) bus.emit('autoCollect', autoAcc)
+      autoAcc = 0
+    }
     if (acc < 0.25) return
     acc = 0
     unclaimed = 0

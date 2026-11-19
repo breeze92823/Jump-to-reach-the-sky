@@ -4,16 +4,16 @@
 // turns to look at you, waves and chatters when you walk up. Two creature
 // showcases on glowing red pads sit among them. Walking up to Upgrades /
 // Items / Effects opens their windows (money prices only); the Sell stall opens
-// Sell Brainrots. The locked stall opens after 4 Rebirths.
-import { AdditiveBlending, BoxGeometry, CanvasTexture, Color, CylinderGeometry, Group, Mesh, MeshBasicMaterial, MeshStandardMaterial, PointLight, SphereGeometry, SRGBColorSpace, TorusGeometry } from 'three'
-import { HUB } from '../config.js'
+// Sell Brainrots. The Ascended Shop stall unveils at ASCENDED.unlock.rebirths.
+import { AdditiveBlending, BoxGeometry, CanvasTexture, Color, ConeGeometry, CylinderGeometry, Group, Mesh, MeshBasicMaterial, MeshStandardMaterial, PointLight, SphereGeometry, SRGBColorSpace, TorusGeometry } from 'three'
+import { ASCENDED, HUB } from '../config.js'
 import { neon } from '../propkit.js'
 import { mulberry32 } from '../textures.js'
 import { lego, solid, wbox } from './kit.js'
 import { signTexture } from './paint.js'
 import { wallSign } from './signs.js'
 import { keeper, placeCreature } from './display.js'
-import { bus, game } from '../game/state.js'
+import { ascendedUnlocked, bus, game } from '../game/state.js'
 
 const box = new BoxGeometry(1, 1, 1)
 const cyl = new CylinderGeometry(1, 1, 1, 16)
@@ -236,44 +236,162 @@ export function buildShops(ctx) {
     stallLabel(ctx, g, 'Items', '#ffd84a', '#4a2a00')
   }
 
-  // 4. Locked stall: covered with a tarp until 4 Rebirths.
+  // 4. Ascended Shop: a royal stall covered with a tarp until ASCENDED.unlock.rebirths. Walking up
+  // always opens the shop (a locked preview before that). When the rebirth lands, the stall unveils:
+  // the lock rattles and bursts, the tarp flies off and a golden crown rises over a velvet cushion.
   {
     const x = 42.5
-    const g = stallShell(root, x, z, { stripes: ['#7a2f2f', '#4a3a3a'], front: '#555555' })
-    const tarp = b(g, '#5e6672', W - 0.2, 0.9, 1.5, 0, 1.8, 0.95)
+    const need = ASCENDED.unlock.rebirths
+    const g = stallShell(root, x, z, { stripes: ['#7a2fd8', '#ffc21f'], front: '#ffb11f' })
+    b(g, '#7a2fd8', 1.1, 0.22, 1.1, 0, 1.5, 1.0) // velvet cushion
+    b(g, '#ffd23a', 1.16, 0.06, 1.16, 0, 1.4, 1.0)
+    // The cover: a tarp with straps and a padlock (dynamic: it flies off).
+    const cover = new Group()
+    cover.userData.dynamic = true
+    g.add(cover)
+    const tarp = b(cover, '#5e6672', W - 0.2, 0.9, 1.5, 0, 1.8, 0.95)
     tarp.rotation.x = 0.04
-    for (const s of [-1, 1]) b(g, '#e0b030', 0.12, 1.0, 1.55, s * 1.4, 1.75, 0.95)
+    for (const sx of [-1, 1]) b(cover, '#e0b030', 0.12, 1.0, 1.55, sx * 1.4, 1.75, 0.95)
     const lock = new Group()
-    lock.userData.dynamic = true
     lock.position.set(0, 2.9, 1.3)
-    g.add(lock)
+    cover.add(lock)
     b(lock, '#ffcc33', 0.7, 0.6, 0.25, 0, 0, 0)
     const shackle = b(lock, '#cfd5dd', 0.42, 0.42, 0.42, 0, 0.36, 0, new TorusGeometry(1, 0.22, 8, 16, Math.PI))
     shackle.scale.set(0.27, 0.32, 0.27)
-    const s = ctx.label('Locked\n4 Rebirths', 2.4, { colors: ['#ff3b3b', '#ff7ad9'], outline: '#2a0a0a', outlineWidth: 16 }, { near: 30, far: 70 })
-    s.position.set(0, 6.3, 0)
-    g.add(s)
+    // The crown over the cushion, inside a slowly turning golden halo.
+    const crown = new Group()
+    crown.userData.dynamic = true
+    crown.position.set(0, 2.25, 1.0)
+    g.add(crown)
+    const gold = new MeshStandardMaterial({ color: '#ffc21f', metalness: 0.85, roughness: 0.22, emissive: '#ff9a1f', emissiveIntensity: 0.35 })
+    b(crown, gold, 0.62, 0.32, 0.62, 0, 0, 0, cyl)
+    for (let i = 0; i < 5; i++) {
+      const a = (i / 5) * Math.PI * 2
+      b(crown, gold, 0.16, 0.42, 0.16, Math.cos(a) * 0.5, 0.36, Math.sin(a) * 0.5, new ConeGeometry(1, 1, 6))
+      b(crown, neon(['#ff4de0', '#3ad0ff', '#5dff4a', '#ff7a1a', '#ffe83a'][i], 3), 0.09, 0.09, 0.09, Math.cos(a) * 0.62, 0.05, Math.sin(a) * 0.62, ball)
+    }
+    const halo = b(crown, new MeshBasicMaterial({ color: new Color('#ffd23a').multiplyScalar(2.2), transparent: true, opacity: 0.7, blending: AdditiveBlending, depthWrite: false }), 0.95, 0.95, 0.95, 0, 0.15, 0, new TorusGeometry(1, 0.04, 6, 40))
+    halo.castShadow = false
+    halo.userData.dynamic = true
+    const light = new PointLight('#c47aff', 0, 11, 2)
+    light.position.set(0, 2.8, 1.8)
+    g.add(light)
+    const lockedTag = ctx.label(`Locked\n${need} Rebirths`, 2.4, { colors: ['#ff3b3b', '#ff7ad9'], outline: '#2a0a0a', outlineWidth: 16 }, { near: 30, far: 70 })
+    lockedTag.position.set(0, 6.3, 0)
+    g.add(lockedTag)
+    const openTag = ctx.label('Ascended', 2.3, { color: '#ffd23a', outline: '#3a0f6a', outlineWidth: 18 }, { near: 45, far: 100 })
+    openTag.position.set(0, 6.3, 0)
+    g.add(openTag)
+
+    // State: 'locked' -> 'unveil' (u seconds into the show) -> 'open'.
+    let phase = ascendedUnlocked() ? 'open' : 'locked'
+    let u = 0
     let shake = 0
+    let hype = 0 // after a purchase: faster spin, brighter light
+    let sparkIn = 0
+    const W0 = () => g.localToWorld(crown.position.clone())
+    // (Labels are detached rather than hidden: the hub's distance fade drives their `visible`.)
+    const setOpenLook = (k) => {
+      cover.visible = k < 1
+      crown.visible = k > 0
+      if (k >= 1) {
+        lockedTag.removeFromParent()
+        g.add(openTag)
+      } else {
+        openTag.removeFromParent()
+        g.add(lockedTag)
+      }
+    }
+    setOpenLook(phase === 'open' ? 1 : 0)
+    crown.scale.setScalar(phase === 'open' ? 1 : 0.001)
     ctx.zone({
       x0: x - W / 2,
       x1: x + W / 2,
       z0: z + 1.5,
       z1: z + 5,
       onEnter() {
-        if (game.rebirths >= 4) {
-          bus.emit('store', 'boosts')
-          return
+        if (phase === 'locked') {
+          shake = 0.6
+          ctx.sfx.locked({ x, z })
+          const p = ctx.player.position
+          ctx.fx.floatText(`Need ${need} Rebirths`, p.x, p.y + 3, p.z, { color: '#ff7ad9', stroke: '#3a0030', size: 0.8, wobble: 0.12 })
+        } else {
+          hype = Math.max(hype, 0.6)
+          ctx.sfx.magic({ x, z })
+          const c = W0()
+          ctx.fx.burst(c.x, c.y + 0.5, c.z, { sprite: 'sparkle', count: 30, colors: ['#ffd23a', '#c47aff', '#ffffff'], speed: [3, 7], up: 2, gravity: 6, life: [0.5, 1], size: [0.3, 0.55] })
         }
-        shake = 0.6
-        ctx.sfx.locked({ x, z })
-        const p = ctx.player.position
-        ctx.fx.floatText('Need 4 Rebirths', p.x, p.y + 3, p.z, { color: '#ff7ad9', stroke: '#3a0030', size: 0.8, wobble: 0.12 })
+        bus.emit('window', 'ascended')
       },
     })
+    // A perk bought: the crown spins up and showers the perk's colour.
+    bus.on('ascendedBuy', ({ id }) => {
+      if (phase !== 'open') return
+      hype = 1.5
+      const col = ASCENDED.perks.find((p) => p.id === id)?.color ?? '#ffd23a'
+      const c = W0()
+      ctx.fx.burst(c.x, c.y + 0.4, c.z, { sprite: 'sparkle', count: 45, colors: [col, '#ffffff', '#ffd23a'], speed: [4, 9], up: 3, gravity: 7, life: [0.7, 1.3], size: [0.35, 0.65], drag: 1 })
+      ctx.fx.ring(x, 0.25, z + 2.5, { color: col, r0: 0.5, r1: 6, life: 0.7 })
+    })
     ctx.onUpdate((t, dt) => {
-      shake = Math.max(0, shake - dt)
-      lock.rotation.z = shake > 0 ? Math.sin(t * 50) * shake * 0.6 : Math.sin(t * 2) * 0.05
-      s.position.y = 6.3 + Math.sin(t * 1.6) * 0.1
+      if (phase === 'locked' && ascendedUnlocked()) {
+        phase = 'unveil'
+        u = 0
+        ctx.sfx.ascendUnlock()
+      }
+      if (phase === 'unveil') {
+        u += dt
+        const c = W0()
+        // 0..0.9 s: the lock rattles harder and harder, sparks spitting.
+        if (u < 0.9) {
+          lock.rotation.z = Math.sin(t * 60) * (0.2 + u * 0.6)
+          lock.scale.setScalar(1 + u * 0.4)
+          if (Math.random() < 0.3) ctx.fx.burst(c.x, c.y + 1.2, c.z + 0.3, { sprite: 'sparkle', count: 4, colors: ['#ffd23a', '#ffffff'], speed: [2, 4], life: [0.2, 0.4], size: [0.25, 0.4] })
+        } else if (u < 2.2) {
+          // 0.9 s: the lock bursts; the tarp flies up and away while the crown rises.
+          if (lock.visible) {
+            lock.visible = false
+            ctx.sfx.unlock({ x, z })
+            ctx.fx.burst(c.x, c.y + 0.7, c.z + 0.3, { sprite: 'sparkle', count: 50, colors: ['#ffcc33', '#ffffff', '#c47aff'], speed: [4, 10], gravity: 6, life: [0.5, 1], size: [0.35, 0.6] })
+            ctx.fx.ring(x, 0.25, z + 1.5, { color: '#ffd23a', r0: 0.5, r1: 9, life: 0.9 })
+          }
+          const k = Math.min(1, (u - 0.9) / 0.9)
+          cover.position.set(0, k * k * 7, -k * 2)
+          cover.rotation.set(-k * 1.4, k * 0.6, k * 0.3)
+          cover.scale.setScalar(Math.max(0.001, 1 - k))
+          crown.visible = true
+          const e = 1 - (1 - k) ** 3
+          crown.scale.setScalar(Math.max(0.001, e + Math.sin(k * Math.PI) * 0.4))
+          light.intensity = 40 * k
+        } else {
+          phase = 'open'
+          setOpenLook(1)
+          crown.scale.setScalar(1)
+          hype = 2
+          ctx.fx.burst(c.x, c.y + 0.5, c.z, { sprite: 'sparkle', count: 90, colors: ['#ffd23a', '#c47aff', '#ffffff', '#ff4de0'], speed: [5, 12], up: 4, gravity: 7, life: [0.8, 1.6], size: [0.4, 0.75], drag: 0.8 })
+          ctx.fx.burst(c.x, c.y + 0.5, c.z, { count: 40, colors: ['#ffd23a', '#7a2fd8', '#ffffff'], speed: [2, 5], life: [0.5, 0.9], size: [0.6, 1], drag: 3, grow: 1.8 })
+          for (let i = 0; i < 4; i++) setTimeout(() => ctx.fx.burst(x + (Math.random() - 0.5) * 6, 9 + Math.random() * 3, z + (Math.random() - 0.5) * 3, { sprite: 'sparkle', count: 40, colors: ['#ffd23a', '#ffffff', i % 2 ? '#c47aff' : '#ff4de0'], speed: [4, 8], gravity: 5, life: [0.8, 1.3], size: [0.35, 0.6], drag: 1.3 }), 200 + i * 230)
+          bus.emit('banner', { title: 'ASCENDED SHOP OPEN!', sub: 'Permanent perks at the SHOPS row', color: '#ffd23a' })
+        }
+      }
+      if (phase === 'locked') {
+        shake = Math.max(0, shake - dt)
+        lock.rotation.z = shake > 0 ? Math.sin(t * 50) * shake * 0.6 : Math.sin(t * 2) * 0.05
+      }
+      if (phase === 'open') {
+        hype = Math.max(0, hype - dt * 0.7)
+        crown.rotation.y += dt * (0.8 + hype * 6)
+        crown.position.y = 2.25 + Math.sin(t * 1.8) * 0.12 + hype * 0.25
+        halo.rotation.set(Math.PI / 2 + Math.sin(t * 0.9) * 0.3, t * 0.7, 0)
+        light.intensity = 16 + Math.sin(t * 3) * 4 + hype * 20
+        sparkIn -= dt
+        if (sparkIn <= 0) {
+          sparkIn = 0.7
+          const c = W0()
+          ctx.fx.burst(c.x, c.y + 0.3, c.z, { sprite: 'sparkle', count: 6, colors: ['#ffd23a', '#c47aff', '#ffffff'], speed: [1, 2.5], up: 1, gravity: 1, life: [0.6, 1.1], size: [0.25, 0.45] })
+        }
+      }
+      lockedTag.position.y = openTag.position.y = 6.3 + Math.sin(t * 1.6) * 0.1
     })
   }
 

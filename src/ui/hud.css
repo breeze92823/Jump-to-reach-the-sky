@@ -107,6 +107,9 @@
   width: var(--tile);
   height: var(--tile);
   padding: 0;
+  /* <button> does not inherit the HUD's white text colour; without this the captions and
+     the badge "!" were drawn black on top of their dark outline. */
+  color: #fff;
   border: calc(var(--tile) * 0.05) solid var(--ink);
   border-radius: calc(var(--tile) * 0.2);
   background: linear-gradient(180deg, var(--c1), var(--c2));
@@ -126,23 +129,33 @@
 .tile .cap {
   position: absolute;
   left: 50%;
-  bottom: 100%;
+  bottom: calc(100% + var(--tile) * 0.03);
   transform: translateX(-50%);
-  font-size: calc(var(--tile) * 0.25);
+  /* Sized so the longest caption ("Playtime") stays within the tile width instead of
+     spilling past the screen edge / into its neighbour, with a stroke thin enough
+     to keep the letters readable. */
+  font-size: calc(var(--tile) * 0.21);
   white-space: nowrap;
-  -webkit-text-stroke: 0.18em var(--ink);
+  color: #fff;
+  -webkit-text-stroke: 0.14em var(--ink);
   paint-order: stroke fill;
-  line-height: 1.15;
+  line-height: 1.1;
+  letter-spacing: 0.01em;
+  text-shadow: 0 0.08em 0 rgba(0, 0, 0, 0.35);
+  pointer-events: none;
 }
 .tile .ready {
   position: absolute;
   left: 50%;
-  bottom: 6%;
+  bottom: 5%;
   transform: translateX(-50%);
-  font-size: calc(var(--tile) * 0.22);
+  font-size: calc(var(--tile) * 0.18);
+  line-height: 1;
+  white-space: nowrap;
   color: #7dff4a;
-  -webkit-text-stroke: 0.18em #0b3a10;
+  -webkit-text-stroke: 0.15em #0b3a10;
   paint-order: stroke fill;
+  pointer-events: none;
 }
 .tile .badge {
   position: absolute;
@@ -271,6 +284,74 @@
 }
 .touch-ui .hud-stats .boosts {
   display: none;
+}
+
+/* --- Event chip (hub events): the live event + countdown, or the next one ------------------ */
+.hud-event {
+  --ec: #5ad0ff;
+  position: absolute;
+  top: var(--event-top, calc(var(--top) + 60px));
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 0.45em;
+  min-height: 32px;
+  padding: 0.15em 0.75em;
+  border: clamp(2px, 0.35vmin, 3px) solid var(--ink);
+  border-radius: 999px;
+  background: rgba(13, 26, 58, 0.72);
+  color: #fff;
+  font-size: clamp(12px, 2.2vmin, 18px);
+  white-space: nowrap;
+  pointer-events: auto;
+  touch-action: none;
+}
+.hud-event .ev-dot {
+  width: 0.7em;
+  height: 0.7em;
+  border-radius: 50%;
+  background: var(--ec);
+  box-shadow: 0 0 0.6em var(--ec);
+}
+.hud-event .ev-c {
+  color: #ffe14a;
+  font-variant-numeric: tabular-nums;
+}
+.hud-event.live {
+  font-size: clamp(14px, 2.8vmin, 24px);
+  background: linear-gradient(90deg, color-mix(in srgb, var(--ec) 70%, #0d1a3a), var(--ec), color-mix(in srgb, var(--ec) 70%, #0d1a3a));
+  background-size: 200% 100%;
+  animation: ev-flow 2.2s linear infinite, ev-pulse 1.6s ease-in-out infinite;
+  box-shadow: 0 0 1.2em color-mix(in srgb, var(--ec) 70%, transparent);
+}
+.hud-event.live .ev-dot {
+  background: #fff;
+  animation: ev-blink 0.8s ease-in-out infinite;
+}
+.hud-event.live .ev-c {
+  color: #fff;
+}
+.hud-event.ending {
+  animation: ev-flow 0.8s linear infinite, ev-shake 0.5s ease-in-out infinite;
+}
+.hud-event.ending .ev-c {
+  color: #ff4a4a;
+}
+@keyframes ev-flow {
+  to { background-position: -200% 0; }
+}
+@keyframes ev-pulse {
+  0%, 100% { transform: translateX(-50%) scale(1); }
+  50% { transform: translateX(-50%) scale(1.06); }
+}
+@keyframes ev-shake {
+  0%, 100% { transform: translateX(-50%) rotate(0); }
+  25% { transform: translateX(-50%) rotate(-3deg); }
+  75% { transform: translateX(-50%) rotate(3deg); }
+}
+@keyframes ev-blink {
+  50% { opacity: 0.3; }
 }
 
 /* --- Right: offers (money prices) -------------------------------------------------------- */

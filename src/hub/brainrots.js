@@ -9,7 +9,7 @@
 import { AdditiveBlending, CanvasTexture, CylinderGeometry, DoubleSide, Mesh, MeshBasicMaterial, MeshStandardMaterial, OctahedronGeometry, Sprite, SpriteMaterial, SRGBColorSpace, Vector3 } from 'three'
 import { HUB, LANE, VARIANTS } from '../config.js'
 import { LEVELS } from '../game/levels.js'
-import { bus, crystalGain, creatureInfo, game, incomeOf, offerPrompt, rollVariant } from '../game/state.js'
+import { ascLevel, ascPerk, bus, countCrystal, crystalGain, eventFx, creatureInfo, game, incomeOf, offerPrompt, rollVariant, toast } from '../game/state.js'
 import { player } from '../player.js'
 import { paintFade } from '../textures.js'
 import { buildCreature, RARITY_COLORS, SPECIES_NAMES, VARIANT_COLORS, VARIANT_NAMES } from './creatures.js'
@@ -211,6 +211,48 @@ export function buildBrainrots(ctx, carry) {
     })
   }
 
+  // --- Brainrot Rain (hub/events.js): one falls from the sky onto (x, ground, z) ----------------
+  // A light beam marks where it will land; it tumbles down trailing sparkles, lands with a thump
+  // and a dust ring, then waits `life` s to be picked up like a lane one (it never respawns).
+  const falling = []
+  function rainDrop(data, x, z, ground, life) {
+    const c = buildCreature(data.species, data.variant, Math.floor(Math.random() * 9999))
+    c.group.position.set(x, ground + 30, z)
+    c.group.rotation.y = rand(0, Math.PI * 2)
+    ctx.scene.add(c.group)
+    const color = data.variant !== 'normal' ? VARIANT_COLORS[data.variant] : RARITY_COLORS[creatureInfo(data.species).rarity]
+    const beam = new Mesh(beamGeo, beamMaterial(color))
+    beam.position.set(x, ground, z)
+    beam.scale.set(0.7, 30, 0.7)
+    ctx.scene.add(beam)
+    falling.push({ data, c, x, z, ground, life, vy: -8, spin: rand(-6, 6), beam, color })
+    ctx.sfx.rainFall({ x, y: ground + 8, z })
+  }
+  function updateFalling(t, dt) {
+    for (let i = falling.length - 1; i >= 0; i--) {
+      const f = falling[i]
+      f.vy -= 32 * dt
+      const g = f.c.group
+      g.position.y += f.vy * dt
+      g.rotation.y += f.spin * dt
+      g.rotation.z = Math.sin(t * 9 + i) * 0.25
+      f.beam.material.opacity = 0.35 + Math.sin(t * 12) * 0.15
+      if (Math.random() < 0.6) ctx.fx.burst(f.x, g.position.y + 0.5, f.z, { sprite: 'sparkle', count: 2, colors: [f.color, '#ffffff'], speed: [0.5, 1.5], life: [0.3, 0.6], size: [0.3, 0.5] })
+      if (g.position.y > f.ground) continue
+      falling.splice(i, 1)
+      f.beam.removeFromParent()
+      f.beam.material.dispose()
+      g.rotation.set(0, g.rotation.y, 0)
+      const it = addItem(f.data, f.c, f.x, f.ground, f.z, -1, f.life)
+      it.armed = true
+      ctx.sfx.rainLand({ x: f.x, y: f.ground, z: f.z }, f.data.variant)
+      ctx.fx.burst(f.x, f.ground + 0.3, f.z, { count: 22, colors: ['#ffffff', '#f3e8cf'], speed: [3, 6], life: [0.4, 0.8], size: [0.6, 1], drag: 3, grow: 1.8, spread: 'ring' })
+      ctx.fx.burst(f.x, f.ground + 1, f.z, { sprite: 'sparkle', count: 20, colors: [f.color, '#ffffff', '#ffe680'], speed: [3, 7], up: 3, gravity: 8, life: [0.5, 0.9], size: [0.35, 0.6] })
+      ctx.fx.ring(f.x, f.ground + 0.08, f.z, { color: f.color, r0: 0.4, r1: 3.4, life: 0.5 })
+      if (f.data.variant === 'rainbow' || f.data.variant === 'lava') bus.emit('toast', { text: `A ${VARIANT_NAMES[f.data.variant]} ${SPECIES_NAMES[f.data.species]} fell from the sky!`, kind: 'rare' })
+    }
+  }
+
   // --- Jump Crystals ---------------------------------------------------------------------------
   const crystalGeo = new OctahedronGeometry(0.55, 0)
   const crystalMat = new MeshStandardMaterial({ color: '#c23bff', emissive: '#9a1fe0', emissiveIntensity: 0.9, metalness: 0.2, roughness: 0.15 })
@@ -242,8 +284,8 @@ export function buildBrainrots(ctx, carry) {
   function grabCrystal(cr) {
     cr.live = false
     cr.mesh.visible = cr.beam.visible = false
-    cr.back = clock + LANE.crystalRespawn
-    const gain = crystalGain(cr.level)
+    cr.back = clock + LANE.crystalRespawn * eventFx.crystalRespawn
+    const gain = Math.round(crystalGain(cr.level) * eventFx.crystalGain)
     game.jumpPower += gain
     const { x, y, z } = cr
     ctx.sfx.crystal({ x, y, z })
@@ -252,6 +294,14 @@ export function buildBrainrots(ctx, carry) {
     ctx.fx.ring(x, y + 0.08, z, { color: '#d06bff', r0: 0.4, r1: 3, life: 0.5 })
     const p = player.position
     ctx.fx.floatText(`+${short(gain)} Jump Power`, p.x, p.y + 2.8, p.z, { color: '#e07bff', stroke: '#2a0a3a', size: 0.85, rise: 2.4, icon: 'jump' })
+    // Every LUCKY_BLOCKS.freeEvery crystals: a free Lucky Block, with a golden fountain.
+    if (countCrystal()) {
+      ctx.sfx.luckyFree()
+      ctx.fx.floatText('FREE Lucky Block!', p.x, p.y + 4, p.z, { color: '#ffe14a', stroke: '#5a2a00', size: 1.1, rise: 3, wobble: 0.12 })
+      ctx.fx.burst(p.x, p.y + 1, p.z, { sprite: 'sparkle', spread: 'up', cone: 0.8, count: 50, colors: ['#ffe14a', '#ffffff', '#ffb02e', '#ff4de0'], speed: [5, 10], gravity: 9, life: [0.8, 1.4], size: [0.35, 0.65] })
+      ctx.fx.ring(p.x, p.y + 0.08, p.z, { color: '#ffe14a', r0: 0.5, r1: 5, life: 0.7 })
+      toast('Free Lucky Block! Open it at the Lucky Blocks.', 'good')
+    }
   }
 
   // --- Start: fill every terrace ------------------------------------------------------------------
@@ -259,6 +309,7 @@ export function buildBrainrots(ctx, carry) {
 
   function update(t, dt) {
     clock += dt
+    updateFalling(t, dt)
     ctx.camera.getWorldPosition(camPos)
     const p = player.position
     const hands = carry.full() // room left on the stack: walk-in pick-up; full: E swaps
@@ -359,6 +410,7 @@ export function buildBrainrots(ctx, carry) {
       if (alive < LANE.perZone) spawn(LEVELS[r.level])
     }
     // Crystals: spin, bob, glint; touch to collect.
+    const magnet = ascLevel('magnet') ? ascPerk('magnet') : null
     for (const cr of crystals) {
       if (!cr.live) {
         if (clock >= cr.back) placeCrystal(cr)
@@ -367,6 +419,23 @@ export function buildBrainrots(ctx, carry) {
       const d = Math.hypot(cr.x - camPos.x, cr.y - camPos.y, cr.z - camPos.z)
       cr.mesh.visible = cr.beam.visible = d < LANE.viewDistance
       if (!cr.mesh.visible) continue
+      // Ascended Crystal Magnet: crystals in range streak to you with a sparkle trail.
+      if (magnet) {
+        const dx = p.x - cr.x
+        const dy = p.y - cr.y
+        const dz = p.z - cr.z
+        const dd = Math.hypot(dx, dy, dz)
+        if (dd < magnet.radius && dd > 0.01 && Math.abs(dy) < 6) {
+          const k = Math.min(1, (dt * (10 + (magnet.radius - dd) * 3)) / dd)
+          cr.x += dx * k
+          cr.y += dy * k
+          cr.z += dz * k
+          cr.mesh.position.x = cr.beam.position.x = cr.x
+          cr.mesh.position.z = cr.beam.position.z = cr.z
+          cr.beam.position.y = cr.y
+          if (Math.random() < 0.5) ctx.fx.burst(cr.x, cr.y + 1, cr.z, { sprite: 'sparkle', count: 2, colors: ['#e07bff', '#ffffff'], speed: [0.5, 1.5], life: [0.25, 0.45], size: [0.25, 0.4] })
+        }
+      }
       cr.mesh.rotation.y = t * 1.8 + cr.phase
       cr.mesh.position.y = cr.y + 1 + Math.sin(t * 2 + cr.phase) * 0.18
       crystalMat.emissiveIntensity = 0.8 + Math.sin(t * 4) * 0.25
@@ -374,5 +443,5 @@ export function buildBrainrots(ctx, carry) {
     }
   }
 
-  return { update, drop, items }
+  return { update, drop, items, rainDrop }
 }

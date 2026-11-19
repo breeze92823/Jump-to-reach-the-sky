@@ -25,6 +25,7 @@ import { buildTraining } from './training.js'
 import { buildLucky } from './lucky.js'
 import { buildShops } from './shops.js'
 import { buildMachines } from './machines.js'
+import { buildEvents } from './events.js'
 import { buildPlots } from './plots.js'
 import { buildLane } from './lane.js'
 import { createCarry } from './carry.js'
@@ -97,13 +98,14 @@ export function buildHub(scene, { camera, isNight = () => false }) {
   buildTraining(ctx)
   buildLucky(ctx)
   buildShops(ctx)
-  buildMachines(ctx)
+  const machines = buildMachines(ctx)
   const carry = createCarry(ctx)
   ctx.carry = carry
   const bases = buildPlots(ctx) // the other players' bases (remotePlayers.js feeds them)
   buildLane(ctx)
   bakeStatic(root)
   const brainrots = buildBrainrots(ctx, carry) // after baking: these come and go
+  buildEvents(ctx, brainrots) // hub events (Brainrot Rain, Crystal Storm, Lava Rush, Golden Machine)
 
   // Every manual jump trains a little jump power too.
   playerHooks.jump = () => {
@@ -212,6 +214,7 @@ export function buildHub(scene, { camera, isNight = () => false }) {
       return prompt
     },
     brainrots,
+    fusion: machines.fusion,
     drop: () => brainrots.drop(),
     sell: () => carry.sell(),
     setDensity(d) {

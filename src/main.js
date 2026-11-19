@@ -280,5 +280,5 @@ if (import.meta.env.DEV) {
     window.removeEventListener('beforeunload', bloxity.teardown)
     setTimeout(() => location.reload(), 300) // let the server's wipe go out first
   }
-  window.__game = { remotes, emotes, player, scene, renderer, camera, postfx, hub, hud, game, bodies: bodyCount, toggleMode, teleport, reset, earn }
+  window.__game = { net, remotes, emotes, player, scene, renderer, camera, postfx, hub, hud, game, bodies: bodyCount, toggleMode, teleport, reset, earn }
 }
