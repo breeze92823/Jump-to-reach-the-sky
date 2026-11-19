@@ -536,3 +536,36 @@ export function playerInRoom(username) {
     // Ignore.
   }
 }
+
+// --- Character kit (Legion.SDK.character; docs.bloxity.io) -------------------------------
+// Preferred for three.js: Boxity builds one outfit file per look (every equipped slot, body
+// proportions included, encoded in the outfit key) and binds it to the game's own rig by bone name,
+// so every item type Boxity adds later shows up with no code change. The manual avatar path
+// (avatar/loader.js) stays as the fallback: dress() resolves null when the kit is off for the game,
+// the key is invalid, a custom character is worn or the file fails to load.
+// The outfit key of the local player ('' = signed out / no SDK).
+export function getOutfitKey() {
+  try {
+    const key = sdk()?.avatar?.getOutfitKey?.()
+    return typeof key === 'string' ? key : ''
+  } catch {
+    return ''
+  }
+}
+export function canDress(key) {
+  try {
+    return !!(key && sdk()?.character?.canDress?.(key))
+  } catch {
+    return false
+  }
+}
+// Dresses `root` (the rig: a SkinnedMesh + the Rig1 bones) with the look for `key`. Resolves the
+// kit handle { update(key) -> Promise<boolean>, dispose(), ... } or null (use the manual path).
+export async function dressCharacter(THREE, GLTFLoader, root, key) {
+  try {
+    return (await sdk()?.character?.dress?.({ THREE, GLTFLoader, root, outfitKey: key })) ?? null
+  } catch (err) {
+    console.warn('[bloxity] character.dress failed; using the manual avatar', err)
+    return null
+  }
+}

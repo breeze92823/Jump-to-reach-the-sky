@@ -644,7 +644,11 @@ export function createPanels({ openWindow, closeWindow, btn, thumb, toast, hub, 
           if (busy || c.i !== week || (!dailyReady() && !(game.dailyPass && week !== 0))) return
           busy = true
           const count = await claim(false)
-          if (count) await rewards.grant(c.def, c)
+          // Grant the day the clock actually gave (the server may have restarted a lapsed streak).
+          if (count) {
+            const got = cards[(game.dailyDay - 1 + DAILY_CYCLE) % DAILY_CYCLE]
+            await rewards.grant(got.def, got)
+          }
           busy = false
           w.refresh()
         }

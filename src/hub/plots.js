@@ -1,5 +1,5 @@
-// The bases along the south wall. Six slots; only the local player's base is
-// built (the other five are blank brown checker pads waiting for owners).
+// The bases along the south wall. Six slots: the local player's own (fully interactive) and five
+// that show the other players' (remoteBase, fed from the roster; an empty seat is an "Open Base").
 // The local base: a studded wooden platform with a sand path down the middle,
 // two rows of cream pedestals each with a glowing green collect pad, creatures
 // earning money every second (each pad shows what it holds; step on it to
@@ -11,7 +11,7 @@
 // up or swaps it. Between the bases: pines, and in front, an hourglass with a
 // free gift (a short jump boost) that pops open every few minutes.
 import { BoxGeometry, ConeGeometry, CylinderGeometry, DoubleSide, Group, Mesh, MeshBasicMaterial, MeshPhysicalMaterial, MeshStandardMaterial, PlaneGeometry, TorusGeometry, Vector3 } from 'three'
-import { HUB } from '../config.js'
+import { COARSE_POINTER, HUB, NET } from '../config.js'
 import { onTick } from '../physics.js'
 import { inputState } from '../input.js'
 import { lego, solid, wbox } from './kit.js'
@@ -76,7 +76,15 @@ function padTag() {
   }
 }
 
-function localBase(ctx, cx) {
+// The pad materials are shared by every base (the glow pulses once a frame, see pulsePads).
+const padMat = new MeshStandardMaterial({ color: '#8ef02a', emissive: '#5ad61a', emissiveIntensity: 0.55, roughness: 0.4 })
+const padDim = new MeshStandardMaterial({ color: '#6a7a5a', emissive: '#1a2a10', emissiveIntensity: 0.1, roughness: 0.6 })
+const pulsePads = (t) => (padMat.emissiveIntensity = 0.5 + Math.sin(t * 3) * 0.12)
+
+// Everything static the bases share: the platform, 12 pedestals with their collect pads (dim until
+// a slot is unlocked), the two-storey pavilion with its ladder, and their colliders. The local base
+// and the other players' bases (remoteBase) both start from this one.
+function baseShell(ctx, cx) {
   const P = HUB.plots
   const z0 = P.front
   const depth = P.depth
@@ -103,8 +111,6 @@ function localBase(ctx, cx) {
   const deckY = 5.6
   const dz0 = z0 + depth - 11.5
   const dz1 = z0 + depth - 0.2
-  const padMat = new MeshStandardMaterial({ color: '#8ef02a', emissive: '#5ad61a', emissiveIntensity: 0.55, roughness: 0.4 })
-  const padDim = new MeshStandardMaterial({ color: '#6a7a5a', emissive: '#1a2a10', emissiveIntensity: 0.1, roughness: 0.6 })
   const slots = []
   const addSlot = (side, row, px, padX, z, top, up) => {
     const i = slots.length
@@ -132,6 +138,48 @@ function localBase(ctx, cx) {
   for (let row = 0; row < 5; row++) for (const side of [-1, 1]) addSlot(side, row, side * 5.6, side * 3.0, z0 + 3.4 + row * 3.4, 0.9, false)
   for (const side of [-1, 1]) addSlot(side, 5, side * 5.5, side * 2.6, (dz0 + dz1) / 2, deckY + 1.12, true)
 
+  // --- Pavilion at the back: posts, a studded deck, railings, ladder ---------------------
+  const post = plain('#6b3d1f')
+  for (const px of [-W / 2 + 0.4, -2.6, 2.6, W / 2 - 0.4]) {
+    for (const pz of [dz0 + 0.3, (dz0 + dz1) / 2, dz1 - 0.3]) {
+      b(root, post, 0.45, deckY, 0.45, px, deckY / 2 + 0.5, pz)
+      solid(0.22, deckY / 2, 0.22, cx + px, deckY / 2 + 0.5, pz)
+    }
+  }
+  wbox(root, W, 0.45, dz1 - dz0, 0, deckY + 0.5, (dz0 + dz1) / 2, wood)
+  wbox(root, W + 0.3, 0.25, 0.4, 0, deckY + 0.25, dz0, dark)
+  solid(W / 2, 0.22, (dz1 - dz0) / 2, cx, deckY + 0.5, (dz0 + dz1) / 2)
+  // Railings with a gap at the ladder.
+  const railY = deckY + 0.73
+  const rail = plain('#8a5129')
+  const railRun = (x0, x1, z) => {
+    b(root, rail, x1 - x0, 0.16, 0.16, (x0 + x1) / 2, railY + 0.95, z)
+    for (let x = x0; x <= x1 + 0.01; x += 1.2) b(root, rail, 0.14, 0.95, 0.14, x, railY + 0.45, z)
+    solid((x1 - x0) / 2, 0.6, 0.1, cx + (x0 + x1) / 2, railY + 0.6, z)
+  }
+  railRun(-W / 2 + 0.3, -1.2, dz0 + 0.1)
+  railRun(1.2, W / 2 - 0.3, dz0 + 0.1)
+  for (const s of [-1, 1]) {
+    b(root, rail, 0.16, 0.16, dz1 - dz0, s * (W / 2 - 0.2), railY + 0.95, (dz0 + dz1) / 2)
+    for (let z = dz0; z <= dz1 + 0.01; z += 1.4) b(root, rail, 0.14, 0.95, 0.14, s * (W / 2 - 0.2), railY + 0.45, z)
+    solid(0.1, 0.6, (dz1 - dz0) / 2, cx + s * (W / 2 - 0.2), railY + 0.6, (dz0 + dz1) / 2)
+  }
+  // Pergola beams over the deck.
+  for (const pz of [dz0 + 0.3, dz1 - 0.3]) b(root, post, W, 0.35, 0.35, 0, deckY + 4.2, pz)
+  for (const px of [-W / 2 + 0.4, -2.6, 2.6, W / 2 - 0.4]) {
+    b(root, post, 0.35, 3.6, 0.35, px, deckY + 2.5, dz0 + 0.3)
+    b(root, post, 0.35, 3.6, 0.35, px, deckY + 2.5, dz1 - 0.3)
+    b(root, post, 0.3, 0.3, dz1 - dz0, px, deckY + 4.4, (dz0 + dz1) / 2)
+  }
+  // Ladder up the front of the deck, from the path.
+  const lz = dz0 - 0.55
+  for (const s of [-1, 1]) b(root, rail, 0.16, deckY + 1.6, 0.16, s * 0.6, (deckY + 1.6) / 2 + 0.5, lz)
+  for (let y = 1.0; y < deckY + 1.8; y += 0.45) b(root, plain('#b07a44'), 1.2, 0.1, 0.12, 0, y, lz)
+  return { P, z0, depth, W, root, slots, deckY, dz0, dz1, lz, wood, dark, cream }
+}
+
+function localBase(ctx, cx) {
+  const { P, z0, depth, W, root, slots, deckY, dz0, dz1, lz } = baseShell(ctx, cx)
   // What a filled slot shows: the creature, its name / rarity / income tag, its variant aura.
   function show(slot) {
     const data = game.slots[slot.i]
@@ -350,43 +398,6 @@ function localBase(ctx, cx) {
     },
   })
 
-  // --- Pavilion at the back: posts, a studded deck, railings, ladder ---------------------
-  const post = plain('#6b3d1f')
-  for (const px of [-W / 2 + 0.4, -2.6, 2.6, W / 2 - 0.4]) {
-    for (const pz of [dz0 + 0.3, (dz0 + dz1) / 2, dz1 - 0.3]) {
-      b(root, post, 0.45, deckY, 0.45, px, deckY / 2 + 0.5, pz)
-      solid(0.22, deckY / 2, 0.22, cx + px, deckY / 2 + 0.5, pz)
-    }
-  }
-  wbox(root, W, 0.45, dz1 - dz0, 0, deckY + 0.5, (dz0 + dz1) / 2, wood)
-  wbox(root, W + 0.3, 0.25, 0.4, 0, deckY + 0.25, dz0, dark)
-  solid(W / 2, 0.22, (dz1 - dz0) / 2, cx, deckY + 0.5, (dz0 + dz1) / 2)
-  // Railings with a gap at the ladder.
-  const railY = deckY + 0.73
-  const rail = plain('#8a5129')
-  const railRun = (x0, x1, z) => {
-    b(root, rail, x1 - x0, 0.16, 0.16, (x0 + x1) / 2, railY + 0.95, z)
-    for (let x = x0; x <= x1 + 0.01; x += 1.2) b(root, rail, 0.14, 0.95, 0.14, x, railY + 0.45, z)
-    solid((x1 - x0) / 2, 0.6, 0.1, cx + (x0 + x1) / 2, railY + 0.6, z)
-  }
-  railRun(-W / 2 + 0.3, -1.2, dz0 + 0.1)
-  railRun(1.2, W / 2 - 0.3, dz0 + 0.1)
-  for (const s of [-1, 1]) {
-    b(root, rail, 0.16, 0.16, dz1 - dz0, s * (W / 2 - 0.2), railY + 0.95, (dz0 + dz1) / 2)
-    for (let z = dz0; z <= dz1 + 0.01; z += 1.4) b(root, rail, 0.14, 0.95, 0.14, s * (W / 2 - 0.2), railY + 0.45, z)
-    solid(0.1, 0.6, (dz1 - dz0) / 2, cx + s * (W / 2 - 0.2), railY + 0.6, (dz0 + dz1) / 2)
-  }
-  // Pergola beams over the deck.
-  for (const pz of [dz0 + 0.3, dz1 - 0.3]) b(root, post, W, 0.35, 0.35, 0, deckY + 4.2, pz)
-  for (const px of [-W / 2 + 0.4, -2.6, 2.6, W / 2 - 0.4]) {
-    b(root, post, 0.35, 3.6, 0.35, px, deckY + 2.5, dz0 + 0.3)
-    b(root, post, 0.35, 3.6, 0.35, px, deckY + 2.5, dz1 - 0.3)
-    b(root, post, 0.3, 0.3, dz1 - dz0, px, deckY + 4.4, (dz0 + dz1) / 2)
-  }
-  // Ladder up the front of the deck, from the path.
-  const lz = dz0 - 0.55
-  for (const s of [-1, 1]) b(root, rail, 0.16, deckY + 1.6, 0.16, s * 0.6, (deckY + 1.6) / 2 + 0.5, lz)
-  for (let y = 1.0; y < deckY + 1.8; y += 0.45) b(root, plain('#b07a44'), 1.2, 0.1, 0.12, 0, y, lz)
   // Climbing: inside the ladder box with any move input (or jump held), go up.
   const ladder = { x0: cx - 0.95, x1: cx + 0.95, z0: lz - 0.9, z1: lz + 0.5 }
   let climbing = false
@@ -432,7 +443,7 @@ function localBase(ctx, cx) {
         s.view.tag.sprite.position.y = s.top + s.view.c.height + 1.0 + Math.sin(t * 1.5 + s.i) * 0.08
       }
     }
-    padMat.emissiveIntensity = 0.5 + Math.sin(t * 3) * 0.12
+    pulsePads(t)
     you.position.y = 9.5 + Math.sin(t * 1.4) * 0.25
     if (acc < 0.25) return
     acc = 0
@@ -461,10 +472,134 @@ function localBase(ctx, cx) {
   return root
 }
 
-function blankBase(ctx, cx) {
-  const P = HUB.plots
-  wbox(ctx.scene, P.width, 0.35, P.depth, cx, 0.175, P.front + P.depth / 2, lego('blank'))
-  solid(P.width / 2, 0.175, P.depth / 2, cx, 0.175, P.front + P.depth / 2)
+// The other players' bases: the same platform, pedestals and pavilion as the local one, with a
+// name gate over the entrance, whatever the owner has placed on the pedestals (synced through the
+// roster, see remotePlayers.js) and glowing collect pads under the filled, unlocked ones. Nothing
+// here is interactive: the owner's brainrots and money are theirs. An empty seat shows "Open Base".
+function remoteBase(ctx, cx, seat) {
+  const { root, slots, W, z0 } = baseShell(ctx, cx)
+  let owner = ''
+  const sign = paintedTexture(768, 256, (c, w, h) => {
+    c.fillStyle = '#5a2f17'
+    c.fillRect(0, 0, w, h)
+    c.fillStyle = '#6b3a1d'
+    for (let i = 0; i < 5; i++) c.fillRect(0, i * 52 + 8, w, 36)
+    if (owner) {
+      outlined(c, owner, w / 2, 100, { size: 104, fill: '#ffffff', stroke: '#2a1408', line: 0.16, maxW: w - 50 })
+      outlined(c, 'Base', w / 2, 200, { size: 66, fill: '#7dff4a', stroke: '#0e2a0a' })
+    } else {
+      outlined(c, 'Open Base', w / 2, 128, { size: 108, fill: '#c9b99a', stroke: '#2a1408', line: 0.16, maxW: w - 50 })
+    }
+  })
+  // A gate over the path: two posts either side of it and the board between, high enough to read
+  // from the hub.
+  const gate = new Group()
+  gate.position.set(0, 0, z0 - 0.6)
+  gate.rotation.y = Math.PI // faces north (the hub)
+  root.add(gate)
+  const post = plain('#4a2612')
+  for (const s of [-1, 1]) {
+    b(gate, post, 0.5, 8.6, 0.5, s * 5.9, 4.3, 0)
+    solid(0.25, 4.3, 0.25, cx + s * 5.9, 4.3, z0 - 0.6)
+  }
+  const board = signPanel(sign, 11, 3.6, { depth: 0.3, back: '#3b1e0e', glow: 0.22 })
+  board.position.set(0, 7.1, 0.15)
+  gate.add(board)
+
+  const views = slots.map(() => null)
+  const keys = slots.map(() => '')
+  let unlocked = 0
+  const refreshPads = () => {
+    for (const s of slots) s.pad.material = views[s.i] && s.i < unlocked ? padMat : padDim
+  }
+  function setView(s, data) {
+    const old = views[s.i]
+    if (old) {
+      old.tag.dispose()
+      old.c.group.removeFromParent()
+      views[s.i] = null
+    }
+    if (!data) return
+    const c = buildCreature(data.species, data.variant, s.i * 7 + 3 + seat * 13)
+    c.group.position.set(s.px, s.top, s.z)
+    c.group.rotation.y = s.rotY
+    root.add(c.group)
+    const tag = makeTag(tagLines(data).slice(0, -1), 1.5) // no $/s: that is the owner's multiplier
+    tag.sprite.position.set(s.px, s.top + c.height + 0.9, s.z)
+    root.add(tag.sprite)
+    views[s.i] = { c, tag, aura: makeAura(ctx.fx, c), s, data, on: false }
+    ctx.fx.burst(cx + s.px, s.top + 0.4, s.z, { sprite: 'sparkle', count: 10, colors: ['#ffe680', '#ffffff', '#7dff4a'], speed: [1.5, 3.5], life: [0.4, 0.8], size: [0.3, 0.5], gravity: 3 })
+  }
+  refreshPads()
+
+  return {
+    seat,
+    views,
+    setOwner(name) {
+      const next = name || ''
+      if (next === owner) return
+      owner = next
+      sign.userData.repaint()
+    },
+    // list: [{ species, variant } | null] by pedestal; count: how many pedestals the owner bought.
+    setSlots(list, count) {
+      unlocked = count
+      for (const s of slots) {
+        const d = list[s.i] ?? null
+        const key = d ? `${d.species}:${d.variant}` : ''
+        if (key === keys[s.i]) continue
+        keys[s.i] = key
+        setView(s, d)
+      }
+      refreshPads()
+    },
+    // Called a few times a second with the camera-side budget decided by the manager.
+    update(t, dt, pp) {
+      for (const v of views) {
+        if (!v) continue
+        const near = Math.hypot(pp.x - (cx + v.s.px), pp.z - v.s.z) < 60
+        if (near) v.c.update(t, dt)
+        v.aura(dt, near && v.on)
+        v.tag.sprite.position.y = v.s.top + v.c.height + 0.9 + Math.sin(t * 1.5 + v.s.i) * 0.08
+      }
+    },
+    cx,
+  }
+}
+
+// All the other bases, keyed by seat. `setOwner(seat, name | null)` / `setSlots(seat, list, count)`
+// are driven from the roster; rare brainrots shine only on the few nearest to the player (aura
+// particles are the costly part, so the budget follows the graphics preset's particle density).
+function remoteBases(ctx, seats) {
+  const bases = new Map(seats.map(([seat, cx]) => [seat, remoteBase(ctx, cx, seat)]))
+  let rank = 0
+  const cand = []
+  ctx.onUpdate((t, dt) => {
+    pulsePads(t)
+    const pp = ctx.player.position
+    rank -= dt
+    if (rank <= 0) {
+      rank = 0.5
+      cand.length = 0
+      for (const base of bases.values()) {
+        for (const v of base.views) {
+          if (!v) continue
+          v.on = false
+          if (v.data.variant === 'normal') continue
+          const d = Math.hypot(pp.x - (base.cx + v.s.px), pp.z - v.s.z)
+          if (d < NET.baseAuraRange) cand.push([d, v])
+        }
+      }
+      cand.sort((a, b) => a[0] - b[0])
+      for (let i = 0; i < Math.min(cand.length, COARSE_POINTER ? NET.baseAuraMaxTouch : NET.baseAuraMax); i++) cand[i][1].on = true
+    }
+    for (const base of bases.values()) base.update(t, dt, pp)
+  })
+  return {
+    has: (seat) => bases.has(seat),
+    setOwner: (seat, name) => bases.get(seat)?.setOwner(name),
+    setSlots: (seat, list, count) => bases.get(seat)?.setSlots(list, count),
+  }
 }
 
 // Free boost hourglass: a purple frame, glass bulbs, sand that drains and flips,
@@ -605,10 +740,11 @@ export function buildPlots(ctx) {
   const rand = mulberry32(909)
   const trees = new Group()
   ctx.scene.add(trees)
+  const others = []
   for (let i = 0; i < P.count; i++) {
     const cx = (i - (P.count - 1) / 2) * pitch
     if (i === P.local) localBase(ctx, cx)
-    else blankBase(ctx, cx)
+    else others.push([i, cx])
     // Pines in the gaps at the back, and between every base.
     if (i < P.count - 1) {
       const gx = cx + pitch / 2
@@ -628,5 +764,6 @@ export function buildPlots(ctx) {
   })
   const localX = (P.local - (P.count - 1) / 2) * pitch
   hourglass(ctx, localX + pitch / 2, P.front - 2.2)
+  return remoteBases(ctx, others)
 }
 

@@ -100,7 +100,7 @@ export function buildHub(scene, { camera, isNight = () => false }) {
   buildMachines(ctx)
   const carry = createCarry(ctx)
   ctx.carry = carry
-  buildPlots(ctx)
+  const bases = buildPlots(ctx) // the other players' bases (remotePlayers.js feeds them)
   buildLane(ctx)
   bakeStatic(root)
   const brainrots = buildBrainrots(ctx, carry) // after baking: these come and go
@@ -205,6 +205,8 @@ export function buildHub(scene, { camera, isNight = () => false }) {
   return {
     state: game,
     carry,
+    fx,
+    bases,
     // The interaction prompt offered this frame (closest wins), for the HUD.
     get prompt() {
       return prompt
