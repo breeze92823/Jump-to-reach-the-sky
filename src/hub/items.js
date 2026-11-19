@@ -231,7 +231,9 @@ export function buildItem(id) {
 }
 
 // Keeps the equipped item on the avatar's back.
-export function mountBackItem(playerGroup) {
+// `getId` says which item to wear (default: the local player's equipped one); remote players pass
+// their synced one.
+export function mountBackItem(playerGroup, getId = () => game.equipped) {
   const holder = new Group()
   holder.position.set(0, 1.12, -0.36) // between the shoulder blades (the avatar faces +Z)
   holder.rotation.y = Math.PI // the item's straps (-Z) against the back, its front facing out
@@ -241,8 +243,9 @@ export function mountBackItem(playerGroup) {
   let pop = 0
   return {
     update(t, dt) {
-      if (game.equipped !== shown) {
-        shown = game.equipped
+      const want = getId() || ''
+      if (want !== shown) {
+        shown = want
         if (item) holder.remove(item.group)
         item = shown ? buildItem(shown) : null
         if (item) {

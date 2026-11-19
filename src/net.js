@@ -30,6 +30,7 @@ export const net = {
   boards: null, // { totalEarned: [{ name, value }], jumpPower: [...] }
   ranks: null, // { totalEarned: n | null, jumpPower: n | null }
   boardsRev: 0, // bumped whenever boards/ranks change
+  joins: 0, // connections made so far (a reconnect is a new session: presence starts over)
   get userId() {
     return sentId
   },
@@ -54,7 +55,10 @@ function storedId(key, make) {
 }
 const rand = () => Math.random().toString(36).slice(2, 8)
 const GUEST = storedId('jump-sky.guest', () => `guest-${rand()}`)
-const DEV = DEV_MODE ? storedId('jump-sky.dev', () => `dev-${rand()}`) : ''
+// Dev only: `?dev=name` plays as `dev-name`, so a second tab (same browser storage) can be a second
+// player in the same local room instead of evicting the first.
+const devParam = DEV_MODE ? (new URLSearchParams(location.search).get('dev') ?? '').replace(/[^A-Za-z0-9_-]/g, '').slice(0, 24) : ''
+const DEV = DEV_MODE ? (devParam ? `dev-${devParam}` : storedId('jump-sky.dev', () => `dev-${rand()}`)) : ''
 
 function identity() {
   if (DEV) return { userId: DEV, username: `Dev ${DEV.slice(4)}` }
@@ -105,6 +109,21 @@ function send(type, payload) {
   } catch (err) {
     console.warn('[net] send failed', type, err)
   }
+}
+
+// --- Presence (presence.js sends, remotePlayers.js reads the roster) ---------------
+// `pose` { x, y, z, yaw, speed, grounded, carrying } ~10/s; `look` { item, outfit, stack, slots,
+// unlocked } when it changes (ids and keys only, never URLs: the server bounds both). Dropped while
+// not connected; a reconnect re-sends the look (the roster keeps the last pose, a new session is
+// unposed until its next one).
+export const sendPose = (pose) => net.connected && send('pose', pose)
+export const sendLook = (look) => net.connected && send('look', look)
+// The other players' roster entries: [sessionId, PlayerState][] without this player, [] offline.
+export function remoteRoster() {
+  const out = []
+  const players = net.room?.state?.players
+  if (players?.forEach) players.forEach((p, id) => id !== net.room.sessionId && out.push([id, p]))
+  return out
 }
 
 // --- Server answers ----------------------------------------------------------
@@ -215,6 +234,7 @@ function onBoards(m) {
 function attach(room) {
   net.room = room
   net.connected = true
+  net.joins++ // presence.js re-sends the look after every (re)connect
   room.onMessage('progress', (m) => onAnswer('progress', m))
   room.onMessage('noProgress', (m) => onAnswer('noProgress', m))
   room.onMessage('serverError', (m) => onAnswer('serverError', m))

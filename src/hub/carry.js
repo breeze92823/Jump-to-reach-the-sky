@@ -9,8 +9,8 @@ import { bus, discover, earn, game, sellValue, toast } from '../game/state.js'
 import { player } from '../player.js'
 import { short } from './paint.js'
 
-const HOLD_Y = 2.25 // m above the feet the first creature sits
-const HOLD_SIZE = 1.75 // m tall when held
+export const HOLD_Y = 2.25 // m above the feet the first creature sits
+export const HOLD_SIZE = 1.75 // m tall when held
 const tmp = new Vector3()
 const ease = (k) => k * k * (3 - 2 * k)
 // Only what the save needs (species, variant and a reward's own income).

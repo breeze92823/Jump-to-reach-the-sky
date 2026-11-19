@@ -299,6 +299,26 @@ export const NET = {
   retryMax: 30, // ...up to this (the matchmaker can hold a cold start for ~45 s)
   rejoin: 1, // s before resolving again after the room closed (e.g. its pod is being replaced)
   claimWait: 8, // s a Daily Reward claim waits for the server's answer
+  // --- Other players (presence.js sends, remotePlayers.js draws; backend presence.ts bounds it) ---
+  poseEvery: 0.1, // s between pose messages (x, y, z, yaw, speed, grounded, carrying); the server drops faster ones
+  poseStill: 1, // s: a player who has not moved still re-sends this often (the server keeps the last pose anyway)
+  lookEvery: 0.4, // s: the most often a changed look (back item, outfit key, carried stack, base slots) is sent
+  remoteMax: 5, // other players drawn at once (the room holds 6): the nearest ones
+  remoteMaxTouch: 2, // ...on touch devices
+  remoteRange: 260, // m past which a remote player is not drawn at all
+  remoteEase: 14, // 1/s the drawn position chases the (dead-reckoned) synced one
+  remoteLead: 0.15, // s of dead-reckoning past the latest pose, no more (it is only a guess)
+  remoteSnap: 12, // m: a bigger gap (a teleport, a respawn) snaps instead of sliding
+  remoteStale: 6, // s without a new pose: stand still (the player may have a hidden tab)
+  remoteTagRange: [30, 70], // m the name tag fades in / out over
+  remoteFxRange: 55, // m within which a remote player's jump / land puffs are shown
+  remoteFxScale: 0.5, // their burst size relative to the local player's
+  remoteAuraMax: 2, // remote players whose carried rare brainrots shine at once (nearest)
+  remoteAuraMaxTouch: 1,
+  baseAuraMax: 5, // rare brainrots on other players' bases that shine at once (nearest to you)
+  baseAuraMaxTouch: 2,
+  baseAuraRange: 60, // m
+  stackShown: 5, // carried brainrots drawn on a remote player (backend STACK_SHOWN_MAX caps it)
 }
 
 // --- Player modes (modes.js) -------------------------------------------------

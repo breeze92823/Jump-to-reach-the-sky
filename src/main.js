@@ -1,5 +1,6 @@
 import { ACESFilmicToneMapping, Clock, NeutralToneMapping, Group, PCFSoftShadowMap, PerspectiveCamera, Scene, SRGBColorSpace, WebGLRenderer } from 'three'
-import * as THREE from 'three' // handed to the portal's chat-bubble helper
+import * as THREE from 'three' // handed to the portal's chat-bubble helper and character kit
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
 import { CAMERA, graphicsPreset, PLAYER_DIMS, RENDER, setLocalBase } from './config.js'
 import * as bloxity from './bloxity.js'
 import { install as installInput, onKey } from './input.js'
@@ -23,6 +24,8 @@ import { net, startNet } from './net.js'
 import { createHud } from './ui/hud.js'
 import { short } from './hub/paint.js'
 import { mountBackItem } from './hub/items.js'
+import { createPresence } from './presence.js'
+import { createRemotePlayers } from './remotePlayers.js'
 
 // Boot order: Bloxity SDK -> renderer -> Rapier (async wasm) -> ground + sky + lighting,
 // player body -> avatar (async, swaps in when ready) -> loop. The SDK is optional at every step.
@@ -111,6 +114,12 @@ const teleport = (x, y, z, facing = player.facing) => {
 const hud = createHud({ renderer, camera, hub, teleport })
 if (awayEarnings > 1) setTimeout(() => hud.toast(`Welcome back! Your brainrots earned $${short(awayEarnings)} while you were away.`, 'good'), 1500)
 
+// --- Other players ----------------------------------------------------------------
+// presence.js tells the room where this player is and what they look like; remotePlayers.js draws
+// everybody else (and fills the other bases) from the roster.
+const presence = createPresence({ carry: hub.carry, isSignedIn: () => !!bloxity.authState.user })
+const remotes = createRemotePlayers({ scene, hub, camera, THREE, GLTFLoader })
+
 // --- Player avatar ----------------------------------------------------------
 // The Bloxity base rig (player.glb; procedural fallback if it fails), dressed
 // with the signed-in player's equipped cosmetics and body proportions. It
@@ -133,20 +142,45 @@ function setAvatar(next) {
 setAvatar(buildDefaultCharacter()) // visible immediately; replaced once the rig loads
 const backItem = mountBackItem(playerGroup) // the equipped Items Shop item, worn on the back
 
+// The look of the signed-in player: the portal's character kit when it can dress this rig (one outfit
+// key covers every equipped slot and the proportions), else the manual path (cosmetics + skin +
+// proportions from the CDN, avatar/loader.js). `kit` is the kit's handle for the current avatar.
+let kit = null
 async function loadAvatar() {
   // The SDK fires twice per change (optimistic + confirmed); only the newest load may land.
   const mine = ++generation
   try {
     const group = await loadBaseCharacter()
     if (mine !== generation) return
-    const equipped = bloxity.authState.user ? bloxity.getEquippedAvatar() : null
-    await attachEquippedAccessories(group, equipped, { skinTextureUrl: bloxity.getSkinTextureUrl() })
-    if (mine !== generation) return
-    applyProportions(group, bloxity.authState.user ? bloxity.getProportions() : null)
+    const user = bloxity.authState.user
+    const key = user ? bloxity.getOutfitKey() : ''
+    const handle = key && bloxity.canDress(key) ? await bloxity.dressCharacter(THREE, GLTFLoader, group, key) : null
+    if (mine !== generation) {
+      handle?.dispose?.()
+      return
+    }
+    if (!handle) {
+      const equipped = user ? bloxity.getEquippedAvatar() : null
+      await attachEquippedAccessories(group, equipped, { skinTextureUrl: bloxity.getSkinTextureUrl() })
+      if (mine !== generation) return
+      applyProportions(group, user ? bloxity.getProportions() : null)
+    }
+    const old = kit
+    kit = handle
     setAvatar(group)
+    old?.dispose?.()
   } finally {
     if (mine === generation) avatarReady = true
   }
+}
+// A look change: the kit keeps the old look until the new one loads (update resolves false when it
+// cannot draw it: rebuild the manual way); without the kit rebuild as before.
+async function lookChanged() {
+  if (!kit) return loadAvatar()
+  const key = bloxity.getOutfitKey()
+  const mine = generation
+  const ok = key ? await kit.update(key).catch(() => false) : false
+  if (!ok && mine === generation) loadAvatar()
 }
 
 let signedIn = null
@@ -157,8 +191,9 @@ bloxity.subscribeAuth((s) => {
     loadAvatar() // also runs once at start to swap in the real rig
   }
 })
-bloxity.onAvatarChanged(loadAvatar)
-bloxity.onProportionsChanged(() => applyProportions(avatar, bloxity.getProportions()))
+bloxity.onAvatarChanged(lookChanged)
+// The outfit key carries the proportions, so with the kit a proportion edit is a look change too.
+bloxity.onProportionsChanged(() => (kit ? lookChanged() : applyProportions(avatar, bloxity.getProportions())))
 bloxity.onRespawnRequest(respawn)
 
 // --- Portal features: ad breaks, chat bubbles, emotes ------------------------------
@@ -169,8 +204,7 @@ bloxity.onAdBreak((on) => {
   adBreak = on
   setSuspended(on)
 })
-// Chat is Boxity's own UI; the game only shows the local player's bubble over their head (the other
-// players are not drawn yet). enable_chat switches the bubbles off.
+// Chat is Boxity's own UI; the game only shows the local player's bubble over their head. enable_chat switches the bubbles off.
 let bubble = null
 bloxity.onChatMessage((m) => {
   if (!chatEnabled || !m?.isLocalPlayer) return
@@ -217,6 +251,8 @@ renderer.setAnimationLoop(() => {
   emotes.update(avatar, dt, !player.grounded || Math.hypot(player.velocity.x, player.velocity.z) > 0.5)
 
   backItem.update(elapsed, dt)
+  presence.update(dt)
+  remotes.update(dt, elapsed)
   updateCamera(camera, dt)
   world.update(dt, elapsed)
   hub.update(dt, renderer.domElement.height)
@@ -244,5 +280,5 @@ if (import.meta.env.DEV) {
     window.removeEventListener('beforeunload', bloxity.teardown)
     setTimeout(() => location.reload(), 300) // let the server's wipe go out first
   }
-  window.__game = { emotes, player, scene, renderer, camera, postfx, hub, hud, game, bodies: bodyCount, toggleMode, teleport, reset, earn }
+  window.__game = { remotes, emotes, player, scene, renderer, camera, postfx, hub, hud, game, bodies: bodyCount, toggleMode, teleport, reset, earn }
 }
